@@ -152,18 +152,21 @@ class PdfService {
     s.ownerPassword = password;
   }
 
-  /// Draws [text] invisibly, stretched to [bounds], so viewers can search
-  /// and select it on top of the page image.
+  /// Draws [text] invisibly, spread across [bounds] (via character spacing,
+  /// since PdfGraphics has no scale transform), so viewers can search and
+  /// select it on top of the page image.
   static void _drawHiddenText(sf.PdfGraphics g, sf.PdfFont font, String text, Rect bounds) {
     final t = text.trim();
     if (t.isEmpty || bounds.width <= 0 || bounds.height <= 0) return;
     final size = font.measureString(t);
     if (size.width <= 0 || size.height <= 0) return;
+    final spacing = t.length > 1 ? (bounds.width - size.width) / (t.length - 1) : 0.0;
     g.save();
     g.setTransparency(0);
-    g.translateTransform(bounds.left, bounds.top);
-    g.scaleTransform(bounds.width / size.width, bounds.height / size.height);
-    g.drawString(t, font, brush: sf.PdfBrushes.black, bounds: Rect.fromLTWH(0, 0, size.width, size.height));
+    g.drawString(t, font,
+        brush: sf.PdfBrushes.black,
+        bounds: Rect.fromLTWH(bounds.left, bounds.top + (bounds.height - size.height) / 2, bounds.width + 1, size.height),
+        format: sf.PdfStringFormat(characterSpacing: spacing, wordWrap: sf.PdfWordWrapType.none));
     g.restore();
   }
 
