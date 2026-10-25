@@ -122,7 +122,63 @@ dependencies {
 '''
 
 
+ROOT_KTS_BLOCK = '''
+// --- ScanPro Studio: plugin compileSdk (tool/configure_android.py) ---
+// flutter_plugin_android_lifecycle requires dependants to compile against
+// API 36+, but some plugins (e.g. file_picker 8.x) still pin 34.
+subprojects {
+    if (project.name != "app") {
+        val raiseCompileSdk = {
+            extensions.findByName("android")?.withGroovyBuilder {
+                val current = "getCompileSdk"() as Int?
+                if (current == null || current < 36) "setCompileSdk"(36)
+            }
+        }
+        if (state.executed) raiseCompileSdk() else afterEvaluate { raiseCompileSdk() }
+    }
+}
+'''
+
+ROOT_GROOVY_BLOCK = '''
+// --- ScanPro Studio: plugin compileSdk (tool/configure_android.py) ---
+// flutter_plugin_android_lifecycle requires dependants to compile against
+// API 36+, but some plugins (e.g. file_picker 8.x) still pin 34.
+subprojects {
+    if (project.name != "app") {
+        def raiseCompileSdk = {
+            def android = project.extensions.findByName("android")
+            if (android != null && (android.compileSdk == null || android.compileSdk < 36)) {
+                android.compileSdk = 36
+            }
+        }
+        if (project.state.executed) raiseCompileSdk() else project.afterEvaluate { raiseCompileSdk() }
+    }
+}
+'''
+
+EVAL_DEPENDS = re.compile(r'^subprojects\s*\{\s*project\.evaluationDependsOn\(\s*["\']:app["\']\s*\)', re.M)
+
+
+def root_gradle():
+    for name, block in (('build.gradle.kts', ROOT_KTS_BLOCK), ('build.gradle', ROOT_GROOVY_BLOCK)):
+        p = os.path.join(ANDROID, name)
+        if not os.path.exists(p):
+            continue
+        s = read(p)
+        if 'ScanPro Studio: plugin compileSdk' in s:
+            return
+        # Register before evaluationDependsOn(":app") so the hook is in place
+        # before plugin projects are evaluated.
+        m = EVAL_DEPENDS.search(s)
+        s = s[:m.start()] + block.lstrip('\n') + '\n' + s[m.start():] if m else s + block
+        write(p, s)
+        return
+    print('root build.gradle not found', file=sys.stderr)
+    sys.exit(1)
+
+
 def gradle():
+    root_gradle()
     kts = os.path.join(APP, 'build.gradle.kts')
     groovy = os.path.join(APP, 'build.gradle')
     if os.path.exists(kts):
