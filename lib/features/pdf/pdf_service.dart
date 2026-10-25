@@ -144,6 +144,13 @@ class PdfService {
     info.creator = 'ScanPro Studio';
   }
 
+  /// Sets a page size, keeping landscape sizes landscape (the size setter
+  /// alone normalises to the current orientation, portrait by default).
+  static void _setPageSize(sf.PdfPageSettings settings, Size size) {
+    settings.orientation = size.width > size.height ? sf.PdfPageOrientation.landscape : sf.PdfPageOrientation.portrait;
+    settings.size = size;
+  }
+
   static void _protect(sf.PdfDocument doc, String? password) {
     if (password == null || password.isEmpty) return;
     final s = doc.security;
@@ -256,7 +263,7 @@ class PdfService {
         final size = pageSizeFor(o, iw, ih);
         final section = doc.sections!.add();
         section.pageSettings.margins.all = 0;
-        section.pageSettings.size = size;
+        _setPageSize(section.pageSettings, size);
         final pg = section.pages.add();
         final g = pg.graphics;
         final pw = size.width, ph = size.height;
@@ -369,6 +376,7 @@ class PdfService {
   }) {
     if (refs.isEmpty) throw const FormatException('No pages selected.');
     final opened = <int, sf.PdfDocument>{};
+    final rotations = <int>[];
     final out = sf.PdfDocument();
     try {
       out.pageSettings.margins.all = 0;
@@ -378,23 +386,36 @@ class PdfService {
         final section = out.sections!.add();
         section.pageSettings.margins.all = 0;
         if (r.blank) {
-          section.pageSettings.size = blankSize;
-          final np = section.pages.add();
-          if (r.rotation != 0) np.rotation = _angle(r.rotation);
+          _setPageSize(section.pageSettings, blankSize);
+          section.pages.add();
+          rotations.add(r.rotation);
           continue;
         }
         final src = opened.putIfAbsent(r.source, () => _open(sources[r.source]));
         if (r.index >= src.pages.count) throw RangeError('Page ${r.index + 1} does not exist');
         final sp = src.pages[r.index];
         final size = sp.size;
-        section.pageSettings.size = size;
+        _setPageSize(section.pageSettings, size);
         final np = section.pages.add();
         np.graphics.drawPdfTemplate(sp.createTemplate(), Offset.zero, size);
-        final total = _deg(sp.rotation) + r.rotation;
-        if (total % 360 != 0) np.rotation = _angle(total);
+        rotations.add(_deg(sp.rotation) + r.rotation);
       }
-      _protect(out, newPassword);
-      return Uint8List.fromList(out.saveSync());
+      if (rotations.every((d) => d % 360 == 0)) {
+        _protect(out, newPassword);
+        return Uint8List.fromList(out.saveSync());
+      }
+      // PdfPage.rotation can only be set on loaded pages, so reload the
+      // assembled document to apply /Rotate without touching the content.
+      final loaded = sf.PdfDocument(inputBytes: out.saveSync());
+      try {
+        for (var i = 0; i < rotations.length; i++) {
+          if (rotations[i] % 360 != 0) loaded.pages[i].rotation = _angle(rotations[i]);
+        }
+        _protect(loaded, newPassword);
+        return Uint8List.fromList(loaded.saveSync());
+      } finally {
+        loaded.dispose();
+      }
     } finally {
       out.dispose();
       for (final d in opened.values) {
@@ -460,7 +481,7 @@ class PdfService {
         final disp = (w > h) == (size.width > size.height) ? size : Size(size.height, size.width);
         final section = out.sections!.add();
         section.pageSettings.margins.all = 0;
-        section.pageSettings.size = disp;
+        _setPageSize(section.pageSettings, disp);
         final pg = section.pages.add();
         pg.graphics.drawImage(sf.PdfBitmap(jpg), Rect.fromLTWH(0, 0, disp.width, disp.height));
         if (font != null && ex != null && textDoc != null) {

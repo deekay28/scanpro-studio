@@ -53,3 +53,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/fonts/FreeSans.ttf
+
+# Host-side tests (sqflite_common_ffi) use the system SQLite, which has FTS4
+# like Android's. The default bundled build only ships FTS5.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system

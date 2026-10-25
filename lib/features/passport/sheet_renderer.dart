@@ -18,6 +18,12 @@ import 'print_layout.dart';
 class SheetRenderer {
   static double pt(double mm) => mmToPt(mm);
 
+  /// The size setter alone normalises to portrait; set orientation first.
+  static void _setPageSize(sf.PdfPageSettings settings, Size size) {
+    settings.orientation = size.width > size.height ? sf.PdfPageOrientation.landscape : sf.PdfPageOrientation.portrait;
+    settings.size = size;
+  }
+
   static Uint8List buildPdf(SheetSpec spec, SheetLayout layout, Uint8List photoJpeg, {String? title, String? photoLabel}) {
     final doc = sf.PdfDocument();
     try {
@@ -26,7 +32,7 @@ class SheetRenderer {
       doc.documentInformation.creator = 'ScanPro Studio';
       final section = doc.sections!.add();
       section.pageSettings.margins.all = 0;
-      section.pageSettings.size = Size(pt(layout.pageWmm), pt(layout.pageHmm));
+      _setPageSize(section.pageSettings, Size(pt(layout.pageWmm), pt(layout.pageHmm)));
       final page = section.pages.add();
       final g = page.graphics;
       final bmp = sf.PdfBitmap(photoJpeg);
@@ -189,7 +195,7 @@ class SheetRenderer {
       doc.documentInformation.title = 'ScanPro print calibration';
       final section = doc.sections!.add();
       section.pageSettings.margins.all = 0;
-      section.pageSettings.size = Size(pt(paper.widthMm), pt(paper.heightMm));
+      _setPageSize(section.pageSettings, Size(pt(paper.widthMm), pt(paper.heightMm)));
       final page = section.pages.add();
       final g = page.graphics;
       final title = sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 14, style: sf.PdfFontStyle.bold);

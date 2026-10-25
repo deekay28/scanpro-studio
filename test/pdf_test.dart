@@ -19,6 +19,7 @@ Uint8List makeTextPdf(List<String> pageTexts, {Size size = const Size(595.28, 84
   for (final t in pageTexts) {
     final section = doc.sections!.add();
     section.pageSettings.margins.all = 0;
+    section.pageSettings.orientation = size.width > size.height ? sf.PdfPageOrientation.landscape : sf.PdfPageOrientation.portrait;
     section.pageSettings.size = size;
     final page = section.pages.add();
     page.graphics.drawString(t, sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 24), bounds: const Rect.fromLTWH(40, 40, 400, 40));
