@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import '../model/edit_state.dart';
+import 'host_ops.dart';
 import 'pdf_edit_engine.dart';
 import 'pdfium_engine.dart';
 
@@ -15,89 +16,6 @@ class RenderedPage {
   const RenderedPage(this.rgba, this.width, this.height);
 }
 
-/// Runs the PDF engine on its own isolate so rendering and exporting large
-/// documents never blocks the UI. PDFium is not thread-safe; this isolate
-/// is its only user while the editor is open.
-class EditorEngineClient {
-  final SendPort _send;
-  final Map<int, Completer<Object?>> _pending = {};
-  int _next = 0;
-  bool _closed = false;
-
-  final int pageCount;
-  final bool encrypted;
-  final String? title;
-
-  EditorEngineClient._(this._send, this.pageCount, this.encrypted, this.title);
-
-  /// Opens [bytes] on a new worker isolate. Throws [EditorPasswordRequired],
-  /// [EditorPermissionDenied] or [PdfEditException].
-  static Future<EditorEngineClient> open(Uint8List bytes, Uint8List unicodeFont, {String? password}) async {
-    final receive = ReceivePort();
-    final isolate = await Isolate.spawn(_workerMain, receive.sendPort, debugName: 'pdf-editor-engine');
-    final events = StreamIterator(receive);
-    await events.moveNext();
-    final send = events.current as SendPort;
-    send.send(('open', bytes, unicodeFont, password, PdfiumEngine.modulePath));
-    await events.moveNext();
-    final reply = events.current;
-    if (reply is _Err) {
-      isolate.kill(priority: Isolate.immediate);
-      receive.close();
-      throw reply.error;
-    }
-    final (count, enc, title) = reply as (int, bool, String?);
-    final c = EditorEngineClient._(send, count, enc, title);
-    // Remaining messages are replies.
-    () async {
-      while (await events.moveNext()) {
-        final (id, value) = events.current as (int, Object?);
-        if (id == -1) {
-          // The worker closed the document; it can be stopped now.
-          receive.close();
-          isolate.kill();
-          break;
-        }
-        final cpl = c._pending.remove(id);
-        if (cpl == null) continue;
-        if (value is _Err) {
-          cpl.completeError(value.error);
-        } else {
-          cpl.complete(value);
-        }
-      }
-    }();
-    return c;
-  }
-
-  Future<T> _call<T>(String method, List<Object?> args) {
-    if (_closed) return Future.error(const PdfEditException('The editor was closed.'));
-    final id = _next++;
-    final c = Completer<Object?>();
-    _pending[id] = c;
-    _send.send((id, method, args));
-    return c.future.then((v) => v as T);
-  }
-
-  Future<PageAnalysis> analyze(int page) => _call('analyze', [page]);
-  Future<Size> slotSize(EditState s, String slot) => _call('slotSize', [s, slot]);
-  Future<RenderedPage> render(EditState s, String slot, double scale, {bool original = false, String draftDir = ''}) =>
-      _call('render', [s, slot, scale, original, draftDir]);
-  Future<TextEditReport> previewTextEdit(TextBlockEdit e) => _call('preview', [e]);
-  Future<ExportResult> export(EditState s, ExportOptions o, String draftDir) => _call('export', [s, o, draftDir]);
-  Future<List<String>> pageTexts(Uint8List bytes, String? password) => _call('texts', [bytes, password]);
-
-  void close() {
-    if (_closed) return;
-    _closed = true;
-    _send.send((-1, 'close', const <Object?>[]));
-    for (final c in _pending.values) {
-      c.completeError(const PdfEditException('The editor was closed.'));
-    }
-    _pending.clear();
-  }
-}
-
 class _Err {
   final Object error;
   const _Err(this.error);
@@ -105,46 +23,151 @@ class _Err {
 
 Object _sendable(Object e) => e is EditorPasswordRequired || e is EditorPermissionDenied || e is PdfEditException ? e : PdfEditException(e.toString());
 
-void _workerMain(SendPort out) {
+/// The app-wide PDFium host: one background isolate that owns PDFium for the
+/// whole process. PDFium is not thread-safe, so every PDF operation in the
+/// app (editor, reader, converters, security tools) runs here, one request
+/// at a time, while the UI stays responsive.
+class PdfiumHost {
+  final SendPort _send;
+  final Map<int, Completer<Object?>> _pending = {};
+  int _next = 1;
+
+  PdfiumHost._(this._send);
+
+  static Future<PdfiumHost>? _instance;
+
+  /// The running host, started on first use with the bundled Unicode font.
+  static Future<PdfiumHost> start(Uint8List unicodeFont) => _instance ??= _spawn(unicodeFont);
+
+  static Future<PdfiumHost> _spawn(Uint8List font) async {
+    final receive = ReceivePort();
+    await Isolate.spawn(_hostMain, (receive.sendPort, font, PdfiumEngine.modulePath), debugName: 'pdfium-host');
+    final events = StreamIterator(receive);
+    await events.moveNext();
+    final host = PdfiumHost._(events.current as SendPort);
+    () async {
+      while (await events.moveNext()) {
+        final (id, value) = events.current as (int, Object?);
+        final c = host._pending.remove(id);
+        if (c == null) continue;
+        if (value is _Err) {
+          c.completeError(value.error);
+        } else {
+          c.complete(value);
+        }
+      }
+    }();
+    return host;
+  }
+
+  Future<T> call<T>(String op, int session, List<Object?> args) {
+    final id = _next++;
+    final c = Completer<Object?>();
+    _pending[id] = c;
+    _send.send((id, op, session, args));
+    return c.future.then((v) => v as T);
+  }
+
+  /// Opens a document. Throws [EditorPasswordRequired],
+  /// [EditorPermissionDenied] or [PdfEditException].
+  Future<HostSession> open(Uint8List bytes, {String? password}) async {
+    final (sid, count, enc, title) = await call<(int, int, bool, String?)>('open', 0, [bytes, password]);
+    return HostSession._(this, sid, count, enc, title, password);
+  }
+
+  /// Runs a stateless operation (see host_ops.dart).
+  Future<T> run<T>(String op, List<Object?> args) => call<T>(op, 0, args);
+}
+
+/// One open document on the host.
+class HostSession {
+  final PdfiumHost host;
+  final int id;
+  final int pageCount;
+  final bool encrypted;
+  final String? title;
+  final String? password;
+  bool _closed = false;
+
+  HostSession._(this.host, this.id, this.pageCount, this.encrypted, this.title, this.password);
+
+  Future<T> call<T>(String op, [List<Object?> args = const []]) {
+    if (_closed) return Future.error(const PdfEditException('The document was closed.'));
+    return host.call<T>(op, id, args);
+  }
+
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    host.call<Object?>('close', id, const []);
+  }
+}
+
+/// The editor's view of a host session.
+class EditorEngineClient {
+  final HostSession session;
+  EditorEngineClient._(this.session);
+
+  int get pageCount => session.pageCount;
+  bool get encrypted => session.encrypted;
+  String? get title => session.title;
+
+  static Future<EditorEngineClient> open(Uint8List bytes, Uint8List unicodeFont, {String? password}) async {
+    final host = await PdfiumHost.start(unicodeFont);
+    return EditorEngineClient._(await host.open(bytes, password: password));
+  }
+
+  Future<PageAnalysis> analyze(int page) => session.call('analyze', [page]);
+  Future<Size> slotSize(EditState s, String slot) => session.call('slotSize', [s, slot]);
+  Future<RenderedPage> render(EditState s, String slot, double scale, {bool original = false, String draftDir = ''}) =>
+      session.call('render', [s, slot, scale, original, draftDir]);
+  Future<TextEditReport> previewTextEdit(TextBlockEdit e) => session.call('preview', [e]);
+  Future<ExportResult> export(EditState s, ExportOptions o, String draftDir) => session.call('export', [s, o, draftDir]);
+  Future<List<String>> pageTexts(Uint8List bytes, String? password) => session.host.run('texts', [bytes, password]);
+
+  void close() => session.close();
+}
+
+// ---------------------------------------------------------------------------
+// Host isolate
+// ---------------------------------------------------------------------------
+
+void _hostMain((SendPort, Uint8List, String?) init) {
+  final (out, font, modulePath) = init;
+  if (modulePath != null) PdfiumEngine.modulePath = modulePath;
+  final engine = PdfiumEngine(unicodeFont: font);
+  final sessions = <int, PdfiumSession>{};
+  var nextSession = 1;
   final inbox = ReceivePort();
   out.send(inbox.sendPort);
-  PdfEditSession? session;
   inbox.listen((msg) {
-    if (msg is (String, Uint8List, Uint8List, String?, String?)) {
-      final (_, bytes, font, password, modulePath) = msg;
-      try {
-        if (modulePath != null) PdfiumEngine.modulePath = modulePath;
-        final s = PdfiumEngine(unicodeFont: font).open(bytes, password: password);
-        session = s;
-        out.send((s.pageCount, s.encrypted, s.title));
-      } catch (e) {
-        out.send(_Err(_sendable(e)));
-      }
-      return;
-    }
-    final (id, method, args) = msg as (int, String, List<Object?>);
-    final s = session;
-    if (method == 'close') {
-      s?.close();
-      session = null;
-      inbox.close();
-      out.send((-1, null));
-      return;
-    }
+    final (id, op, sid, args) = msg as (int, String, int, List<Object?>);
     try {
-      if (s == null) throw const PdfEditException('No document is open.');
-      final Object result = switch (method) {
-        'analyze' => s.analyze(args[0] as int),
-        'slotSize' => s.slotSize(args[0] as EditState, args[1] as String),
-        'render' => () {
-            final r = s.render(args[0] as EditState, args[1] as String, args[2] as double, original: args[3] as bool, draftDir: args[4] as String);
-            return RenderedPage(r.rgba, r.width, r.height);
-          }(),
-        'preview' => s.previewTextEdit(args[0] as TextBlockEdit),
-        'export' => s.export(args[0] as EditState, options: args[1] as ExportOptions, draftDir: args[2] as String),
-        'texts' => PdfiumSession.pageTexts(args[0] as Uint8List, password: args[1] as String?),
-        _ => throw PdfEditException('Unknown engine call $method'),
-      };
+      Object? result;
+      switch (op) {
+        case 'open':
+          final s = engine.open(args[0] as Uint8List, password: args[1] as String?) as PdfiumSession;
+          final n = nextSession++;
+          sessions[n] = s;
+          result = (n, s.pageCount, s.encrypted, s.title);
+        case 'close':
+          sessions.remove(sid)?.close();
+        default:
+          final s = sid == 0 ? null : sessions[sid];
+          if (sid != 0 && s == null) throw const PdfEditException('The document is no longer open.');
+          result = switch (op) {
+            'analyze' => s!.analyze(args[0] as int),
+            'slotSize' => s!.slotSize(args[0] as EditState, args[1] as String),
+            'render' => () {
+                final r = s!.render(args[0] as EditState, args[1] as String, args[2] as double, original: args[3] as bool, draftDir: args[4] as String);
+                return RenderedPage(r.rgba, r.width, r.height);
+              }(),
+            'preview' => s!.previewTextEdit(args[0] as TextBlockEdit),
+            'export' => s!.export(args[0] as EditState, options: args[1] as ExportOptions, draftDir: args[2] as String),
+            'texts' => PdfiumSession.pageTexts(args[0] as Uint8List, password: args[1] as String?),
+            _ => runHostOp(op, s, args, engine),
+          };
+      }
       out.send((id, result));
     } catch (e) {
       out.send((id, _Err(_sendable(e))));

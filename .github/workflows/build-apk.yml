@@ -29,6 +29,13 @@ jobs:
           channel: stable
           cache: true
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python libraries for Office output validation in tests
+        run: python3 -m pip install python-docx openpyxl python-pptx
+
       - name: Flutter version
         run: flutter --version
 

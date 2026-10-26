@@ -1,3 +1,4 @@
+import 'dart:convert' show latin1;
 import 'dart:ffi' hide Size;
 import 'dart:io';
 import 'dart:math' as math;
@@ -14,6 +15,7 @@ import '../model/edit_state.dart';
 import 'pdf_edit_engine.dart';
 import 'text_layout.dart';
 
+part 'pdfium_security.dart';
 part 'pdfium_tools.dart';
 
 /// PDFium-based implementation of [PdfEditEngine] (BSD-3/Apache-2.0,
@@ -1462,7 +1464,32 @@ class PdfiumSession implements PdfEditSession {
     return 1;
   }
 
-  Uint8List _save(FPDF_DOCUMENT doc, int flags) {
+  /// Re-writes a damaged file: PDFium rebuilds broken cross-reference
+  /// tables when opening, and saving writes a clean structure.
+  static Uint8List repair(Uint8List bytes, {String? password}) {
+    final buf = malloc<Uint8>(bytes.length);
+    buf.asTypedList(bytes.length).setAll(0, bytes);
+    try {
+      final doc = _load(buf, bytes.length, password);
+      if (doc == nullptr) {
+        final err = _p.FPDF_GetLastError();
+        if (err == 4) throw EditorPasswordRequired(wrong: password != null);
+        throw const PdfEditException('The file is too damaged to be repaired.');
+      }
+      try {
+        if (_p.FPDF_GetPageCount(doc) == 0) throw const PdfEditException('No pages could be recovered from this file.');
+        return _saveDoc(doc, FPDF_NO_INCREMENTAL);
+      } finally {
+        _p.FPDF_CloseDocument(doc);
+      }
+    } finally {
+      malloc.free(buf);
+    }
+  }
+
+  Uint8List _save(FPDF_DOCUMENT doc, int flags) => _saveDoc(doc, flags);
+
+  static Uint8List _saveDoc(FPDF_DOCUMENT doc, int flags) {
     final cb = NativeCallable<Int Function(Pointer<FPDF_FILEWRITE_>, Pointer<Void>, UnsignedLong)>.isolateLocal(_writeBlock, exceptionalReturn: 0);
     final fw = malloc<FPDF_FILEWRITE_>();
     final sink = BytesBuilder(copy: false);
