@@ -9,9 +9,12 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:pdfium_dart/pdfium_dart.dart';
 
+import '../../convert/model/page_content.dart';
 import '../model/edit_state.dart';
 import 'pdf_edit_engine.dart';
 import 'text_layout.dart';
+
+part 'pdfium_tools.dart';
 
 /// PDFium-based implementation of [PdfEditEngine] (BSD-3/Apache-2.0,
 /// runs fully on-device). PDFium edits real page content: text objects can
