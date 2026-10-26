@@ -77,7 +77,7 @@ class PdfLibrary {
   /// Saves PDF bytes as a library document (kind = pdf). The file is stored
   /// unchanged; its text layer (if any) is extracted and indexed for search.
   static Future<ScanDocument> saveToLibrary(DocumentRepository repo, Uint8List bytes, String title,
-      {String? parentId, String? password, DocKind kind = DocKind.pdf}) async {
+      {String? parentId, String? password, DocKind kind = DocKind.pdf, List<String>? pageTexts}) async {
     final info = PdfService.inspect(PdfSource(bytes, password: password));
     final doc = await repo.createDocument(
       title: Naming.unique(Naming.sanitize(title, maxLength: 120), await repo.allTitles()),
@@ -90,7 +90,7 @@ class PdfLibrary {
     await repo.storage.file(rel).writeAsBytes(bytes, flush: true);
     await repo.db.update('documents', {'pdf_path': rel, 'page_count': info.pageCount}, where: 'id = ?', whereArgs: [doc.id]);
     try {
-      final texts = PdfService.extractText(PdfSource(bytes, password: password));
+      final texts = pageTexts ?? PdfService.extractText(PdfSource(bytes, password: password));
       await repo.indexPdfText(doc.id, texts);
     } catch (_) {}
     repo.changed();

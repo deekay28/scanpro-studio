@@ -18,6 +18,7 @@ import '../../core/units.dart';
 import '../../shared/widgets.dart';
 import '../pdf/export_actions.dart';
 import '../pdf/pdf_library.dart';
+import '../pdf_editor/editor/image_library.dart';
 import '../pdf/pdf_viewer_screen.dart';
 import 'calibration_screen.dart';
 import 'frame_editor.dart';
@@ -291,6 +292,14 @@ class _PassportStudioScreenState extends ConsumerState<PassportStudioScreen> {
       final r = await ExportActions.saveBytes(bytes, name);
       if (r != null && mounted) showSnack(context, 'Saved $name');
     }
+  }
+
+  /// Keeps the finished photo in the app so it can be inserted into a PDF
+  /// form with the PDF editor (Insert Image → Saved in ScanPro).
+  Future<void> _keepForEditor() async {
+    if (_finalPath == null) return;
+    await ImageLibrary.images.save(await _photoBytes(), ext: 'jpg', label: _preset.name);
+    if (mounted) showSnack(context, 'Photo kept. In the PDF editor use Insert Image → Saved in ScanPro.');
   }
 
   Future<void> _exportSingle() async {
@@ -732,6 +741,8 @@ class _PassportStudioScreenState extends ConsumerState<PassportStudioScreen> {
       FilledButton.icon(onPressed: _exportPdf, icon: const Icon(Icons.picture_as_pdf), label: const Text('Print-ready PDF (preview, print, share)')),
       const SizedBox(height: 8),
       OutlinedButton.icon(onPressed: _saveToLibrary, icon: const Icon(Icons.library_add_outlined), label: const Text('Save sheet in app')),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(onPressed: _keepForEditor, icon: const Icon(Icons.collections_bookmark_outlined), label: const Text('Keep photo for PDF editor')),
       const SizedBox(height: 16),
       Text('High-resolution image (DPI embedded)', style: t.textTheme.titleSmall),
       const SizedBox(height: 6),

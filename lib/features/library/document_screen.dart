@@ -19,8 +19,10 @@ import '../ocr/ocr_screen.dart';
 import '../pdf/export_actions.dart';
 import '../pdf/pdf_export_screen.dart';
 import '../pdf/pdf_library.dart';
+import '../pdf/pdf_service.dart';
 import '../pdf/pdf_tools_screen.dart';
 import '../pdf/pdf_viewer_screen.dart';
+import '../pdf_editor/pdf_editor_launcher.dart';
 import '../qr/qr_screen.dart';
 import '../scanner/scan_flow.dart';
 import '../security/vault.dart';
@@ -228,6 +230,24 @@ class _DocumentScreenState extends ConsumerState<DocumentScreen> {
     await ExportActions.shareFiles([bytesPath]);
   }
 
+  /// Builds a searchable PDF from the scanned pages (with their OCR text)
+  /// and opens it in the PDF editor. The scans themselves are not changed.
+  Future<void> _editAsPdf() async {
+    final d = _doc!;
+    final bytes = await runBusy(
+      context,
+      'Preparing PDF…',
+      (ctl) => PdfService.buildFromPages(
+        _pages,
+        PdfExportOptions(pageSize: null, searchable: true, title: d.title),
+        ocrFor: (pg) => _repo.loadOcr(pg),
+        onProgress: (a, b) => ctl.update('Preparing page $a of $b…', a / b),
+      ),
+    );
+    if (bytes == null || !mounted) return;
+    await PdfEditorLauncher.open(context, bytes, d.title);
+  }
+
   Future<void> _menu(String v) async {
     final d = _doc!;
     switch (v) {
@@ -236,6 +256,8 @@ class _DocumentScreenState extends ConsumerState<DocumentScreen> {
       case 'ocr':
         if (!mounted) return;
         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OcrScreen(docId: d.id)));
+      case 'editpdf':
+        await _editAsPdf();
       case 'tags':
         await _tags();
       case 'folder':
@@ -331,6 +353,7 @@ class _DocumentScreenState extends ConsumerState<DocumentScreen> {
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'rename', child: Text('Rename')),
               if (!d.isPdf) const PopupMenuItem(value: 'ocr', child: Text('Recognise text (OCR)')),
+              if (!d.isPdf) const PopupMenuItem(value: 'editpdf', child: Text('Edit as PDF')),
               if (!d.isPdf) PopupMenuItem(value: 'reorder', child: Text(_reorder ? 'Done reordering' : 'Reorder pages')),
               const PopupMenuItem(value: 'tags', child: Text('Tags')),
               const PopupMenuItem(value: 'folder', child: Text('Move to folder')),
@@ -496,6 +519,7 @@ class _PdfDocBodyState extends ConsumerState<_PdfDocBody> {
     }
     if (l == null) return const Center(child: CircularProgressIndicator());
     final actions = <(IconData, String, VoidCallback)>[
+      (Icons.edit_document, 'Edit PDF', () => PdfEditorLauncher.open(context, l.bytes, widget.doc.title, docId: widget.doc.id, password: l.password)),
       (Icons.open_in_full, 'View', () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => PdfViewerScreen(bytes: l.bytes, title: widget.doc.title, offerSaveToLibrary: false, password: l.password)))),
       (Icons.view_module_outlined, 'Organise', () => PdfTools.organize(context, ref, l, parentId: widget.doc.id)),

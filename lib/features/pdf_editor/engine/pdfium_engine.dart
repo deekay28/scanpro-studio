@@ -768,7 +768,7 @@ class PdfiumSession implements PdfEditSession {
           continue;
         }
         if (e.replacement != null) {
-          final file = File(p_join(ctx.draftDir, e.replacement!));
+          final file = File(_resolve(ctx.draftDir, e.replacement!));
           if (file.existsSync()) _loadImageInto(ctx, page, o, file.readAsBytesSync(), e.opacity);
         }
         if (e.box != null) {
@@ -786,7 +786,7 @@ class PdfiumSession implements PdfEditSession {
     return annots;
   }
 
-  static String p_join(String a, String b) => p.isAbsolute(b) ? b : p.join(a, b);
+  static String _resolve(String a, String b) => p.isAbsolute(b) ? b : p.join(a, b);
 
   /// Lays out and writes an edited block. Also used by [previewTextEdit].
   TextEditReport _applyTextEdit(_ApplyCtx ctx, FPDF_PAGE page, _Geom g, List<FPDF_PAGEOBJECT> handles, Set<FPDF_PAGEOBJECT> toRemove,
@@ -981,7 +981,7 @@ class PdfiumSession implements PdfEditSession {
         }
         return false;
       case ItemKind.image:
-        final file = it.asset == null ? null : File(p_join(ctx.draftDir, it.asset!));
+        final file = it.asset == null ? null : File(_resolve(ctx.draftDir, it.asset!));
         if (file == null || !file.existsSync()) {
           ctx.warnings.add('An inserted image file is missing and was skipped.');
           return false;
@@ -1159,7 +1159,7 @@ class PdfiumSession implements PdfEditSession {
     final p = _p;
     final b = it.box;
     if (it.asset != null) {
-      final file = File(p_join(ctx.draftDir, it.asset!));
+      final file = File(_resolve(ctx.draftDir, it.asset!));
       if (file.existsSync()) {
         final o = p.FPDFPageObj_NewImageObj(ctx.doc);
         _loadImageInto(ctx, page, o, file.readAsBytesSync(), it.opacity);
@@ -1260,7 +1260,7 @@ class PdfiumSession implements PdfEditSession {
     final p = _p;
     final slot = state.slot(slotId);
     if (slot == null) throw PdfEditException('Unknown page $slotId');
-    final needsEdits = !original && state.slotHasContentEdits(slot);
+    final needsEdits = !original && (state.slotHasContentEdits(slot) || !state.decorations.isEmpty);
     if (!needsEdits && !slot.isBlank) {
       final page = _loadPage(_ref, slot.source!);
       try {
@@ -1279,7 +1279,13 @@ class PdfiumSession implements PdfEditSession {
         page = _loadPage(doc, slot.source!);
       }
       try {
-        if (!original) _applyPage(ctx, page, state, slot);
+        if (!original) {
+          _applyPage(ctx, page, state, slot);
+          if (!state.decorations.isEmpty) {
+            // Preview numbering follows the current page order.
+            _applyDecorations(ctx, page, state.decorations, state.slots.indexOf(slot) + 1, state.slots.length);
+          }
+        }
         return _renderPage(page, scale);
       } finally {
         p.FPDF_ClosePage(page);
@@ -1493,6 +1499,51 @@ class PdfiumSession implements PdfEditSession {
           warnings.add('${annotsBefore - after} existing annotation(s), link(s) or form field(s) were not preserved.');
         }
         return ExportResult(bytes, count, warnings, annotationsBefore: annotsBefore, annotationsAfter: after, encrypted: enc);
+      } finally {
+        p.FPDF_CloseDocument(doc);
+      }
+    } finally {
+      malloc.free(buf);
+    }
+  }
+
+  /// Text of every page of [bytes] as PDFium extracts it (used to index
+  /// edited documents for search).
+  static List<String> pageTexts(Uint8List bytes, {String? password}) {
+    final p = _p;
+    final buf = malloc<Uint8>(bytes.length);
+    buf.asTypedList(bytes.length).setAll(0, bytes);
+    try {
+      final doc = _load(buf, bytes.length, password);
+      if (doc == nullptr) return const [];
+      try {
+        final out = <String>[];
+        for (var i = 0; i < p.FPDF_GetPageCount(doc); i++) {
+          final pg = p.FPDF_LoadPage(doc, i);
+          if (pg == nullptr) {
+            out.add('');
+            continue;
+          }
+          final tp = p.FPDFText_LoadPage(pg);
+          try {
+            final n = p.FPDFText_CountChars(tp);
+            if (n <= 0) {
+              out.add('');
+              continue;
+            }
+            final b = malloc<Uint16>(n + 1);
+            try {
+              final got = p.FPDFText_GetText(tp, 0, n, b.cast());
+              out.add(String.fromCharCodes(b.asTypedList(math.max(0, got - 1))));
+            } finally {
+              malloc.free(b);
+            }
+          } finally {
+            p.FPDFText_ClosePage(tp);
+            p.FPDF_ClosePage(pg);
+          }
+        }
+        return out;
       } finally {
         p.FPDF_CloseDocument(doc);
       }

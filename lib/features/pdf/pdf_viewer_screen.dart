@@ -10,6 +10,7 @@ import '../../core/providers.dart';
 import '../../core/storage.dart';
 import '../../shared/widgets.dart';
 import '../library/document_screen.dart';
+import '../pdf_editor/pdf_editor_launcher.dart';
 import 'export_actions.dart';
 import 'pdf_library.dart';
 import 'pdf_service.dart';
@@ -119,6 +120,11 @@ class _PdfViewerScreenState extends ConsumerState<PdfViewerScreen> {
       appBar: AppBar(
         title: Text(widget.title, overflow: TextOverflow.ellipsis),
         actions: [
+          IconButton(
+            onPressed: () => PdfEditorLauncher.open(context, widget.bytes, widget.title, password: widget.password),
+            icon: const Icon(Icons.edit_document),
+            tooltip: 'Edit PDF',
+          ),
           IconButton(onPressed: _share, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
           IconButton(onPressed: _print, icon: const Icon(Icons.print_outlined), tooltip: 'Print'),
           IconButton(onPressed: _saveDevice, icon: const Icon(Icons.save_alt), tooltip: 'Save to device'),

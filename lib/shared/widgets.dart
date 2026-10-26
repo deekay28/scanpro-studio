@@ -26,6 +26,7 @@ Future<T?> runBusy<T>(
   String message,
   Future<T> Function(BusyController ctl) task, {
   bool cancellable = false,
+  bool rethrowErrors = false,
 }) async {
   final ctl = BusyController(message);
   final nav = Navigator.of(context, rootNavigator: true);
@@ -69,6 +70,7 @@ Future<T?> runBusy<T>(
     final r = await task(ctl);
     return r;
   } catch (e) {
+    if (rethrowErrors) rethrow;
     messenger?.showSnackBar(SnackBar(content: Text(friendlyError(e)), duration: const Duration(seconds: 5)));
     return null;
   } finally {

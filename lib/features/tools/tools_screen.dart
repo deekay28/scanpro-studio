@@ -6,6 +6,7 @@ import '../book/book_scan_screen.dart';
 import '../ocr/quick_ocr_screen.dart';
 import '../passport/calibration_screen.dart';
 import '../pdf/pdf_tools_screen.dart';
+import '../pdf_editor/pdf_editor_launcher.dart';
 import '../qr/qr_screen.dart';
 import '../scanner/scan_flow.dart';
 import '../security/vault.dart';
@@ -20,6 +21,8 @@ class ToolsScreen extends ConsumerWidget {
       (
         'PDF tools',
         [
+          (Icons.edit_document, 'Edit PDF', 'Edit text, images, sign, annotate, stamp', () => PdfEditorLauncher.pickAndOpen(context)),
+          (Icons.history_edu_outlined, 'Unfinished PDF edits', 'Continue edits you did not save', () => push(const EditorDraftsScreen())),
           (Icons.picture_as_pdf_outlined, 'Images to PDF', 'Create a multi-page PDF', () => ScanFlow.importImages(context, ref)),
           (Icons.merge_type, 'Merge PDFs', 'Combine files in any order', () => PdfTools.merge(context, ref)),
           (Icons.call_split, 'Split / extract', 'By page ranges', () => PdfTools.pickThen(context, ref, 'split')),
