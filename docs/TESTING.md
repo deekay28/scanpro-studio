@@ -41,6 +41,33 @@ database/search layer and backups. The items below need a real Android phone. Re
   damaged file (error message). Organise: reorder, rotate, delete, blank page → Save as new (original
   unchanged). Merge two PDFs, split "1-2, 3-", compress (lossless + Email), protect, remove password.
 
+## Workflow G – PDF editor (see docs/PDF_EDITOR.md)
+Use a typical office PDF (Word export), a PDF with a subset font, a scanned PDF, a Hindi PDF, a form
+PDF and a password-protected PDF.
+1. Documents → PDF → **Edit PDF**. Edit Text: tap a paragraph (blue outline) → tap again → fix a typo
+   → **Check font & layout** says "Original font reused" → Apply. Compare (⇄) shows the original.
+2. Make a sentence longer in a paragraph → it wraps inside the width; enable "Keep inside the original
+   box" → font shrinks. Change colour/bold → the notice names the substitute font.
+3. Drag a selected block and resize it with the right-edge handle; undo/redo both.
+4. Add Text: tap a margin → type → Date quick action. Insert Image → Gallery → crop → resize with the
+   corner handle (ratio kept) → rotate 15° → opacity 50%.
+5. Sign → Draw → save → add name and date → move/resize. Sign → Import a photographed signature →
+   background removed. Delete a saved signature.
+6. Annotate: highlight two lines, underline, strike, pen, note, rectangle, arrow. Stamp → APPROVED with
+   date; image stamp (seal photo, background removed).
+7. Pages: reorder by drag, rotate, insert blank, delete, header/footer/page numbers/watermark, select 2
+   pages → Extract.
+8. Scanned PDF: banner "Scanned page" → Use OCR → Recognise (Hindi model for Hindi) → correct a line →
+   Add as searchable layer → Replace a line visually → review on the page.
+9. Kill the app while editing → reopen the same document → "Unsaved edits found" → Continue. Tools →
+   Unfinished PDF edits lists drafts.
+10. Save → "Save as new version" → the report shows pages checked, annotations kept, password kept. Open
+   the new version in another PDF app: text is selectable/searchable; annotations are editable there;
+   the original document is unchanged. Repeat with Flatten on (annotations burned in) and with
+   Replace original (confirmation required).
+11. Password PDF: wrong password is rejected; a PDF that forbids editing shows "Editing not allowed".
+12. 300+ page PDF: page navigation and thumbnails stay responsive; saving completes.
+
 ## Edge cases
 - Airplane mode: everything except Smart scan module download works.
 - Storage nearly full: export shows "Not enough storage space".

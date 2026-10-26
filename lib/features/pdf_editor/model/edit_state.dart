@@ -126,13 +126,15 @@ class TextBlockEdit {
   final TextStyleSpec? style; // null = keep original formatting
   final Rect? box; // new box (display points); null = original position
   final bool shrinkToFit; // keep within the original box height
+  final bool fixedWidth; // the user set the box width (otherwise one-line text may grow)
 
-  const TextBlockEdit({required this.page, required this.objects, this.deleted = false, this.text, this.style, this.box, this.shrinkToFit = false});
+  const TextBlockEdit(
+      {required this.page, required this.objects, this.deleted = false, this.text, this.style, this.box, this.shrinkToFit = false, this.fixedWidth = false});
 
   String get key => blockKey(page, objects);
   static String blockKey(int page, List<int> objects) => '$page:${objects.join(',')}';
 
-  TextBlockEdit copyWith({bool? deleted, String? text, TextStyleSpec? style, Rect? box, bool? shrinkToFit}) => TextBlockEdit(
+  TextBlockEdit copyWith({bool? deleted, String? text, TextStyleSpec? style, Rect? box, bool? shrinkToFit, bool? fixedWidth}) => TextBlockEdit(
         page: page,
         objects: objects,
         deleted: deleted ?? this.deleted,
@@ -140,6 +142,7 @@ class TextBlockEdit {
         style: style ?? this.style,
         box: box ?? this.box,
         shrinkToFit: shrinkToFit ?? this.shrinkToFit,
+        fixedWidth: fixedWidth ?? this.fixedWidth,
       );
 
   Map<String, dynamic> toJson() => {
@@ -150,6 +153,7 @@ class TextBlockEdit {
         if (style != null) 's': style!.toJson(),
         if (box != null) 'b': _rect(box!),
         if (shrinkToFit) 'f': true,
+        if (fixedWidth) 'fw': true,
       };
 
   factory TextBlockEdit.fromJson(Map<String, dynamic> j) => TextBlockEdit(
@@ -160,6 +164,7 @@ class TextBlockEdit {
         style: j['s'] == null ? null : TextStyleSpec.fromJson(j['s'] as Map<String, dynamic>),
         box: j['b'] == null ? null : _rectOf(j['b']),
         shrinkToFit: j['f'] as bool? ?? false,
+        fixedWidth: j['fw'] as bool? ?? false,
       );
 }
 

@@ -60,6 +60,23 @@ Legend: ✅ implemented · 🟡 implemented with documented limitations · ⏳ n
 | Preview, Android share sheet, save via Storage Access Framework, print via Android print framework | ✅ | |
 | Every tool writes a **new** file; originals are never modified | ✅ | |
 
+### PDF editor (in-place content editing)
+Full details, SDK evaluation and the complete/partial/unsupported checklist: **[docs/PDF_EDITOR.md](docs/PDF_EDITOR.md)**.
+
+| Feature | Status | Notes |
+|---|---|---|
+| Edit existing text in place: select blocks/paragraphs, correct, rewrite, delete, move, resize; font, size, colour, bold/italic, alignment, line spacing | ✅ | PDFium page-object editing. Rewrites in the **original embedded font** when it has the glyphs, otherwise the closest standard font, with an explicit warning. |
+| Character spacing | 🟡 | Preserved for in-place rewrites only; not adjustable. |
+| Hindi text editing | 🟡 | Possible, but Devanagari isn't shaped (a warning is shown). |
+| Add text anywhere (real selectable PDF text), quick date/subject/ref./remarks | ✅ | |
+| Insert/edit images: move, resize, rotate, crop, opacity, replace, duplicate, delete | ✅ | Existing images: move, resize, replace, delete. |
+| Sign: draw, import with background clean-up, saved private signatures, name/designation/date | ✅ | A signature image, not a cryptographic digital signature. |
+| Annotations (highlight, underline, strike, pen, notes, shapes, arrows), stamps (presets, custom, image) | ✅ | Real PDF annotations, editable until flattened. |
+| Watermark, header/footer, page numbers; rotate/insert/extract/delete/reorder pages | ✅ | |
+| Scanned PDFs: OCR, correct, searchable layer, visual line replacement | ✅ | The scan itself is never altered. |
+| Undo/redo, compare with original, autosaved drafts with recovery, save as new version, validation on export | ✅ | |
+| Password-protected PDFs and edit restrictions | ✅ | Encryption kept by default; restrictions are respected. |
+
 ### OCR & intelligence (on-device)
 | Feature | Status | Notes |
 |---|---|---|
@@ -127,6 +144,8 @@ lib/
     editor/                    crop editor, page editor
     library/                   documents, search, page viewer, trash
     pdf/                       PDF engine (Syncfusion), tools, export, viewer
+    pdf_editor/                in-place PDF editor: engine interface, PDFium engine (worker isolate),
+                               edit model (undo/redo, drafts), workspace UI, signatures, OCR overlay
     ocr/                       ML Kit OCR, text analysis, OCR UI
     passport/                  presets, layout engine, renderer, studio UI, calibration
     book/  annotate/  qr/  security/  backup/  settings/  tools/  home/  shell/
@@ -159,6 +178,7 @@ All versions are constrained in `pubspec.yaml`. CI resolves the newest compatibl
 | google_mlkit_selfie_segmentation | background replacement |
 | google_mlkit_barcode_scanning | QR/barcodes |
 | image 4.2.x | decode/encode in isolates |
+| pdfium_dart 0.2.x + ffi | PDF editor engine: PDFium (BSD-3/Apache-2.0) via FFI. The build hook downloads and bundles `libpdfium.so` (about 6.4 MB per ABI). No key, account or runtime network. |
 | syncfusion_flutter_pdf | PDF create/merge/split/encrypt/text extraction ([Syncfusion Community License](https://www.syncfusion.com/products/communitylicense): free for individuals and small companies; check your eligibility) |
 | printing | preview, rasterising, Android print |
 | share_plus | share sheet |
@@ -212,6 +232,8 @@ The APK is signed with the Flutter debug key. That's fine for personal sideloadi
 
 Repository tests use `sqflite_common_ffi` and need a native SQLite library: it's built into Windows/macOS. On Linux, install `libsqlite3-dev`.
 
+PDF editor tests load the PDFium library that the `pdfium_dart` build hook downloads on the first `flutter test` (network needed once). They also use Poppler's `pdftotext` to check text as a standard viewer extracts it (`sudo apt-get install poppler-utils`; CI installs it).
+
 ---
 
 ## 5. Tests
@@ -224,6 +246,8 @@ Repository tests use `sqflite_common_ffi` and need a native SQLite library: it's
 | `test/text_and_models_test.dart` | entity extraction, classification, name suggestions, review flags (incl. Hindi), CSV tables, FTS query builder, naming, JSON/DB round trips, preset validation, page-range parsing |
 | `test/repository_test.dart` | **acceptance tests**: original preserved after enhancement; OCR search finds a known word and the index follows edits/deletes/restores; batch order preserved and sessions recovered after restart; duplicates; trash; folders/tags; backup round trip; Hindi search |
 | `test/widget_test.dart` | widget smoke tests |
+| `test/pdf_editor_test.dart` | **PDF editor acceptance tests** on 10 fixture types (generated, embedded font, subset font, mixed styles, scanned, Hindi+English, multi-page, images/links/forms, password, 300 pages), text layout, edit model and undo/redo |
+| `test/pdf_editor_widget_test.dart` | the editor workspace with the real PDFium worker: render, select, tools, page navigation, undo/redo, draft autosave, export |
 
 Camera, ML Kit, biometrics and the print dialog need a real device. They're covered by the manual test checklist in `docs/TESTING.md`.
 
@@ -263,13 +287,14 @@ Scripts that ML Kit doesn't support (Tamil, Bengali, Gujarati, …) would need a
 
 ## 9. Known limitations
 
-- **Compile status:** the source was written in an environment without the Flutter SDK. The first CI run is the first real compilation; see `docs/BUILD_STATUS.md` for the actual results.
+- **Build status:** see `docs/BUILD_STATUS.md` for the latest CI results.
+- **PDF editor:** see the limitations in `docs/PDF_EDITOR.md` §5 (Hindi shaping, font embedding size, reflow scope).
 - Pure-Dart processing of 20+ MP photos takes roughly 1–4 s per page on mid-range phones. Processed pages are capped at 2800 px by default (configurable), and originals keep full resolution.
 - Smart scan needs Google Play services. Without it, use the Pro camera.
 - Curved-page flattening is approximate (see Book mode).
 - Background replacement can struggle with fine hair, transparent glasses, or clothing in the same colour as the background. Always use the side-by-side preview and the refine brush.
 - OCR confidence values depend on the plugin version. When they're missing, uncertainty flags are heuristic.
-- PDF page operations don't carry over form fields, links or annotations of the source pages.
+- The older PDF tools (Organise, Merge, Split) don't carry over form fields, links or annotations of the source pages. The PDF editor's page tools do preserve them.
 - Very large documents (hundreds of pages) are assembled in memory by the PDF library. Export in parts if memory is tight.
 - APKs are signed with a debug key.
 

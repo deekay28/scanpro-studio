@@ -94,7 +94,8 @@ class _PdfEditorScreenState extends ConsumerState<PdfEditorScreen> {
       initialStyle: style,
       block: b,
       initialShrink: e?.shrinkToFit ?? false,
-      preview: (text, st, shrink) => c.previewTextEdit(TextBlockEdit(page: b.page, objects: b.objects, text: text, style: st == b.originalStyle ? null : st, box: e?.box, shrinkToFit: shrink)),
+      preview: (text, st, shrink) => c.previewTextEdit(
+          TextBlockEdit(page: b.page, objects: b.objects, text: text, style: st == b.originalStyle ? null : st, box: e?.box, shrinkToFit: shrink, fixedWidth: e?.fixedWidth ?? false)),
     );
     if (r == null || !mounted) return;
     final keepStyle = !r.styleChanged && e?.style == null;
@@ -102,7 +103,14 @@ class _PdfEditorScreenState extends ConsumerState<PdfEditorScreen> {
       if (e != null) c.revertBlock(b);
       return;
     }
-    final edit = TextBlockEdit(page: b.page, objects: b.objects, text: r.text, style: keepStyle || r.style == b.originalStyle ? null : r.style, box: e?.box, shrinkToFit: r.shrinkToFit);
+    final edit = TextBlockEdit(
+        page: b.page,
+        objects: b.objects,
+        text: r.text,
+        style: keepStyle || r.style == b.originalStyle ? null : r.style,
+        box: e?.box,
+        shrinkToFit: r.shrinkToFit,
+        fixedWidth: e?.fixedWidth ?? false);
     c.apply(c.state.withTextEdit(edit));
     c.select(Selection.block(b.key));
     try {

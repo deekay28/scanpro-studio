@@ -186,7 +186,8 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final b = c.selectedBlock;
     if (b != null) {
       final e = s.textEdits[b.key] ?? TextBlockEdit(page: b.page, objects: b.objects);
-      c.apply(s.withTextEdit(e.copyWith(box: r, text: e.text ?? b.text, style: e.style ?? b.originalStyle)), transient: true, render: false);
+      c.apply(s.withTextEdit(e.copyWith(box: r, text: e.text ?? b.text, style: e.style ?? b.originalStyle, fixedWidth: e.fixedWidth || _drag == _Drag.resize)),
+          transient: true, render: false);
       return;
     }
     final i = c.selectedImage;

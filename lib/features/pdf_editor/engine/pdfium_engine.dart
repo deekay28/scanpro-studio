@@ -827,17 +827,21 @@ class PdfiumSession implements PdfEditSession {
 
     final font = _pickFont(ctx, style, text, original: first, originalHandle: origFont, notes: notes);
     var box = e.box ?? block.bounds;
-    // A single line (label, heading) grows to the right like in a word
-    // processor; paragraphs keep their width and reflow.
-    if (e.box == null && block.lines.length == 1 && !text.contains('\n') && !e.shrinkToFit) {
+    if (block.lines.length == 1 && !text.contains('\n') && !e.shrinkToFit && !e.fixedWidth) {
+      // A single line (label, heading) grows to the right like in a word
+      // processor instead of wrapping.
       box = Rect.fromLTWH(box.left, box.top, math.max(box.width, analysis.size.width - box.left - 18), box.height);
+    } else if (!e.fixedWidth) {
+      // Glyph bounds are slightly narrower than advance widths; without
+      // slack the widest original line could wrap.
+      box = Rect.fromLTWH(box.left, box.top, box.width + style.size * 0.6, box.height);
     }
     var size = style.size;
     var leading = style.lineSpacing * size;
     double measure(String s) => _measure(font.handle, s, size);
     var lay = layoutText(text, box.width, style.align, measure);
     // Baseline of the first line relative to the box top.
-    double firstBaseline() => e.box == null && size == first.size ? first.baseline.dy - block!.bounds.top : _ascent(font.handle, size);
+    double firstBaseline() => size == first.size ? first.baseline.dy - block!.bounds.top : _ascent(font.handle, size);
     var baseline0 = firstBaseline();
     double height() => baseline0 + (lay.lineCount - 1) * leading + size * 0.25;
     if (e.shrinkToFit) {

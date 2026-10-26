@@ -1,10 +1,30 @@
 # Build & test status
 
+Results from real runs (GitHub Actions, Flutter 3.47.8 stable, Ubuntu runner) and a local Linux run of the same Flutter version.
+
 | Item | Result |
 |---|---|
-| Source written | ✅ |
-| Compiled by Flutter | ⏳ not yet – pending first CI run |
-| `flutter analyze` | ⏳ |
-| `flutter test` | ⏳ |
-| Release APK | ⏳ |
-| On-device manual tests (docs/TESTING.md) | ⏳ not run – requires a physical phone |
+| Compiled by Flutter (`flutter build apk --release`, universal + per-ABI) | ✅ CI run #6 (v1.0.6): all four APKs built |
+| `flutter analyze` | ✅ no errors or warnings (7 infos in older code) |
+| `flutter test` | ✅ 96 / 96 passed locally, including 15 PDF-editor engine tests and the editor widget test; CI test step passed |
+| PDFium packaged in the APK | ✅ `lib/arm64-v8a/libpdfium.so` (6.4 MB) present in the release APK |
+| Release permissions (`aapt dump permissions`) | ✅ see `permissions.txt` in each release; INTERNET is removed |
+| On-device manual tests (`docs/TESTING.md`, incl. Workflow G: PDF editor) | ⏳ not run: needs a physical phone |
+
+## PDF editor acceptance tests (automated, actual results)
+All passed. See `docs/PDF_EDITOR.md` §7 for what each test checks.
+
+| # | Fixture | Result |
+|---|---|---|
+| 1 | Digitally generated PDF, unembedded Helvetica, scaled text matrix | ✅ |
+| 2 | Fully embedded TrueType font | ✅ |
+| 3 | Subset font | ✅ |
+| 4 | Mixed font sizes and colours | ✅ |
+| 5 | Scanned image-only page (OCR layer, cover, replacement) | ✅ |
+| 6 | Hindi + English | ✅ (with the expected Devanagari shaping warning) |
+| 7 | Multi-page with header/footer; reorder/delete/rotate/blank/page numbers/extract | ✅ |
+| 8 | Images, links, form fields; inserted photo/signature/annotations/stamp; flatten | ✅ |
+| 9 | AES-256 password-protected PDF | ✅ |
+| 10 | 300-page PDF | ✅ |
+| + | Paragraph reflow, move keeps line and baseline, style-only change keeps line breaks | ✅ |
+| UI | Editor workspace with the real PDFium worker | ✅ |

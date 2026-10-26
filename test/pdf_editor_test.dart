@@ -444,6 +444,38 @@ void main() {
       expect(sw.elapsed.inSeconds, lessThan(60));
     });
 
+    test('moving a line keeps it on one line at the same relative baseline; style-only change keeps line breaks', () {
+      final src = sfDoc((d) {
+        final g = d.pages.add().graphics;
+        final f = sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 12);
+        g.drawString('A heading that must stay on one line', f, bounds: const Rect.fromLTWH(60, 60, 400, 16));
+        g.drawString('Para line one is here and is long', f, bounds: const Rect.fromLTWH(60, 120, 400, 16));
+        g.drawString('para line two is also here ok', f, bounds: const Rect.fromLTWH(60, 136, 400, 16));
+      });
+      final s = engine.open(src);
+      final a = s.analyze(0);
+      final h = blockContaining(a, 'heading');
+      final moved = h.bounds.shift(const Offset(30, 200));
+      final out = s.export(EditState.initial(1).withTextEdit(TextBlockEdit(page: 0, objects: h.objects, text: h.text, box: moved)));
+      final s2 = engine.open(out.bytes);
+      final h2 = blockContaining(s2.analyze(0), 'heading');
+      expect(h2.lines.length, 1);
+      expect(h2.first.baseline.dy - moved.top, closeTo(h.first.baseline.dy - h.bounds.top, 0.05));
+      expect(h2.first.baseline.dx, closeTo(moved.left, 0.6));
+      s2.close();
+      final para = blockContaining(a, 'Para line one');
+      expect(para.lines.length, 2);
+      final out2 = s.export(EditState.initial(1).withTextEdit(
+          TextBlockEdit(page: 0, objects: para.objects, text: para.text, style: para.originalStyle.copyWith(color: 0xFFC62828, font: FontChoice.helvetica))));
+      final s3 = engine.open(out2.bytes);
+      final p3 = blockContaining(s3.analyze(0), 'Para line one');
+      expect(p3.lines.length, 2, reason: 'no unexpected wrapping');
+      expect(p3.text, para.text);
+      expect(p3.first.color & 0xFFFFFF, 0xC62828);
+      s3.close();
+      s.close();
+    });
+
     test('added text is real selectable text; paragraph reflow keeps it inside the page', () {
       final src = sfDoc((d) {
         final g = d.pages.add().graphics;
@@ -459,7 +491,7 @@ void main() {
       final longer = '${para.flowText} With an extra sentence appended to the paragraph to force wrapping.';
       final e = TextBlockEdit(page: 0, objects: para.objects, text: longer, style: para.originalStyle.copyWith(align: TextAlign2.left), box: para.bounds);
       final rep = s.previewTextEdit(e);
-      expect(rep.outBounds.width, lessThanOrEqualTo(para.bounds.width + 0.5));
+      expect(rep.outBounds.width, lessThanOrEqualTo(para.bounds.width + para.first.size * 0.6 + 0.5), reason: "wraps within the width plus the advance-width slack");
       expect(rep.fontUsed, contains('Times'));
       final shrink = s.previewTextEdit(e.copyWith(shrinkToFit: true));
       expect(shrink.outBounds.height, lessThanOrEqualTo(para.bounds.height + 1));

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -156,7 +157,10 @@ class PdfEditorController extends ChangeNotifier {
   }
 
   void setRenderScale(double s) {
-    final v = s.clamp(1.0, 4.0);
+    // Cap the bitmap at about 12 megapixels to bound memory use.
+    final size = slotSize;
+    final cap = size == null || size.isEmpty ? 4.0 : math.min(4.0, math.sqrt(12e6 / (size.width * size.height)));
+    final v = s.clamp(1.0, math.max(1.0, cap)).toDouble();
     if ((v - renderScale).abs() < 0.25) return;
     renderScale = v;
     refresh();
