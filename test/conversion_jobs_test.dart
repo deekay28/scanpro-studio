@@ -13,6 +13,7 @@ import 'package:scanpro_studio/features/convert/model/page_content.dart';
 import 'package:scanpro_studio/features/pdf_editor/engine/pdfium_engine.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 
+import 'conversion_test.dart' show reportPdf;
 import 'convert_support.dart';
 import 'pdf_editor_test.dart' show findPdfium, freeSans, sfDoc;
 
@@ -181,6 +182,16 @@ void main() {
     expect(d.pages.count, 2);
     expect(d.pages[0].size.width, closeTo(841.89, 0.5), reason: 'landscape image on a landscape A4 page');
     d.dispose();
+  });
+
+  test('table review: previewSheets gives the tables the export writes, ready for correction', () async {
+    final path = put('report.pdf', reportPdf());
+    final (sheets, warnings) = await service.previewSheets(ConversionType.pdfToXlsx, path, null, const ConversionOptions());
+    expect(sheets.map((s) => s.name), ['Page 1 table 1', 'Page 2 table 1']);
+    expect(sheets.first.rows.any((r) => r.map((c) => c.text).join('|') == 'South|950|38,250.50'), isTrue);
+    expect(warnings.join(' '), contains('check merged cells'));
+    final onlyP2 = await service.previewSheets(ConversionType.pdfToXlsx, path, null, const ConversionOptions(pageRange: '2'));
+    expect(onlyP2.$1.map((s) => s.name), ['Page 2 table 1']);
   });
 }
 

@@ -309,27 +309,8 @@ class ConversionService {
       }
       // Structured content, with OCR for scanned pages.
       final needImages = type == ConversionType.pdfToDocx || type == ConversionType.pdfToHtml || (type == ConversionType.pdfToPptx && o.pptxEditable);
-      final contents = <PageContent>[];
       final pageImages = <int, ({Uint8List bytes})>{};
-      var ocrSkipped = 0;
-      for (var k = 0; k < pages.length; k++) {
-        token.check();
-        progress(k / pages.length * 0.8, 'Reading page ${pages[k] + 1} of ${s.pageCount}…');
-        var c = await s.call<PageContent>('content', [pages[k], needImages]);
-        if (c.scanned) {
-          if (o.ocr && ocr != null && type != ConversionType.pdfToPptx) {
-            progress(k / pages.length * 0.8, 'Recognising text on page ${pages[k] + 1}…');
-            c = await _ocrPage(s, c, o.ocrScript);
-          } else if (type != ConversionType.pdfToPptx) {
-            ocrSkipped++;
-          }
-          if (type == ConversionType.pdfToPptx && o.pptxEditable) {
-            pageImages[pages[k]] = (bytes: await s.call<Uint8List>('renderEncoded', [pages[k], o.dpi, RasterFormat.jpg.index, o.jpegQuality, false]));
-          }
-        }
-        contents.add(c);
-      }
-      if (ocrSkipped > 0) warnings.add('$ocrSkipped scanned page(s) have no text layer; ${ocr == null ? 'OCR is not available here' : 'turn on OCR'} to convert their text.');
+      final (contents, ocrSkipped) = await _pdfContents(type, s, pages, o, needImages, pageImages, warnings, progress, token);
       token.check();
       progress(0.85, 'Writing file…');
       switch (type) {
@@ -349,21 +330,7 @@ class ConversionService {
           await write('$base.txt', utf8Bytes(text));
           warnings.addAll(contentWarnings(contents));
         case ConversionType.pdfToXlsx || ConversionType.pdfToCsv:
-          var tables = await compute(_work, ('tables', [contents])) as List<ExtractedTable>;
-          if (tables.isEmpty && o.allTextIfNoTable) {
-            warnings.add('No table was detected; every text line was exported as a row instead.');
-            tables = [
-              for (final c in contents)
-                ExtractedTable(c.index, Offset.zero & c.size, [
-                  for (final l in c.lines) [parseCell(l.text)]
-                ], 'text lines')
-            ];
-          } else if (tables.isEmpty) {
-            throw const FormatException('No tables were found on the selected pages.');
-          }
-          final uncertain = tables.fold<int>(0, (n, t) => n + t.uncertainCells);
-          if (uncertain > 0) warnings.add('$uncertain cell(s) look misread or have low OCR confidence; they are highlighted and kept as text.');
-          warnings.add('Tables are detected automatically; check merged cells and column boundaries.');
+          final tables = await _tablesFor(contents, o, warnings);
           if (type == ConversionType.pdfToXlsx) {
             final x = await compute(_work, ('tables2xlsx', [tables, o.sheetPerPage, base])) as Uint8List;
             await write('$base.xlsx', x);
@@ -396,6 +363,79 @@ class ConversionService {
     } finally {
       s.close();
     }
+  }
+
+  /// Reads the structured content of [pages], running OCR on scanned pages
+  /// when allowed. Returns the contents and the number of scanned pages whose
+  /// text could not be recognised.
+  Future<(List<PageContent>, int)> _pdfContents(ConversionType type, HostSession s, List<int> pages, ConversionOptions o, bool needImages,
+      Map<int, ({Uint8List bytes})> pageImages, List<String> warnings, void Function(double, String) progress, CancelToken token) async {
+    final contents = <PageContent>[];
+    var ocrSkipped = 0;
+    for (var k = 0; k < pages.length; k++) {
+      token.check();
+      progress(k / pages.length * 0.8, 'Reading page ${pages[k] + 1} of ${s.pageCount}…');
+      var c = await s.call<PageContent>('content', [pages[k], needImages]);
+      if (c.scanned) {
+        if (o.ocr && ocr != null && type != ConversionType.pdfToPptx) {
+          progress(k / pages.length * 0.8, 'Recognising text on page ${pages[k] + 1}…');
+          c = await _ocrPage(s, c, o.ocrScript);
+        } else if (type != ConversionType.pdfToPptx) {
+          ocrSkipped++;
+        }
+        if (type == ConversionType.pdfToPptx && o.pptxEditable) {
+          pageImages[pages[k]] = (bytes: await s.call<Uint8List>('renderEncoded', [pages[k], o.dpi, RasterFormat.jpg.index, o.jpegQuality, false]));
+        }
+      }
+      contents.add(c);
+    }
+    if (ocrSkipped > 0) warnings.add('$ocrSkipped scanned page(s) have no text layer; ${ocr == null ? 'OCR is not available here' : 'turn on OCR'} to convert their text.');
+    return (contents, ocrSkipped);
+  }
+
+  /// Extracts tables for review before export (PDF → Excel/CSV and
+  /// PowerPoint → Excel). The sheets can be corrected and then written with
+  /// [writeXlsx] or [tableToCsv].
+  Future<(List<Sheet>, List<String>)> previewSheets(ConversionType type, String path, String? password, ConversionOptions o,
+      {void Function(double, String)? onProgress, CancelToken? cancel}) async {
+    final token = cancel ?? CancelToken();
+    void progress(double v, String m) => onProgress?.call(v.clamp(0, 1).toDouble(), m);
+    final bytes = await File(path).readAsBytes();
+    if (type == ConversionType.pptxToXlsx) {
+      progress(0.3, 'Reading slides…');
+      return await compute(_work, ('pptxSheets', [bytes, o.toJson()])) as (List<Sheet>, List<String>);
+    }
+    final warnings = <String>[];
+    final s = await (await _host).open(bytes, password: password);
+    try {
+      final pages = o.pageRange.trim().isEmpty ? [for (var i = 0; i < s.pageCount; i++) i] : PdfService.parseRanges(o.pageRange, s.pageCount).expand((e) => e).toSet().toList();
+      final (contents, _) = await _pdfContents(type, s, pages, o, false, {}, warnings, progress, token);
+      token.check();
+      progress(0.85, 'Finding tables…');
+      final tables = await _tablesFor(contents, o, warnings);
+      return (tablesToSheets(tables, perPage: o.sheetPerPage), warnings);
+    } finally {
+      s.close();
+    }
+  }
+
+  Future<List<ExtractedTable>> _tablesFor(List<PageContent> contents, ConversionOptions o, List<String> warnings) async {
+    var tables = await compute(_work, ('tables', [contents])) as List<ExtractedTable>;
+    if (tables.isEmpty && o.allTextIfNoTable) {
+      warnings.add('No table was detected; every text line was exported as a row instead.');
+      tables = [
+        for (final c in contents)
+          ExtractedTable(c.index, Offset.zero & c.size, [
+            for (final l in c.lines) [parseCell(l.text)]
+          ], 'text lines')
+      ];
+    } else if (tables.isEmpty) {
+      throw const FormatException('No tables were found on the selected pages.');
+    }
+    final uncertain = tables.fold<int>(0, (n, t) => n + t.uncertainCells);
+    if (uncertain > 0) warnings.add('$uncertain cell(s) look misread or have low OCR confidence; they are highlighted and kept as text.');
+    warnings.add('Tables are detected automatically; check merged cells and column boundaries.');
+    return tables;
   }
 
   Future<PageContent> _ocrPage(HostSession s, PageContent c, String script) async {
@@ -452,6 +492,12 @@ Object _work((String, List<Object?>) msg) {
     case 'tables':
       const svc = TableExtractionService();
       return [for (final c in (a[0] as List).cast<PageContent>()) ...svc.extract(c)];
+    case 'pptxSheets':
+      final o = ConversionOptions.fromJson((a[1] as Map).cast<String, dynamic>());
+      final deck = readPptx(a[0] as Uint8List);
+      final only = o.slideRange.trim().isEmpty ? null : PdfService.parseRanges(o.slideRange, deck.slides.length).expand((e) => e).toList();
+      final res = pptxToSheets(deck, o: PptxExtractOptions(slides: only, tables: o.extractTables, charts: o.extractCharts, text: o.extractText, sheetPerSlide: o.slideSheets));
+      return (res.sheets, res.notes);
     case 'tables2xlsx':
       return writeXlsx(tablesToSheets((a[0] as List).cast<ExtractedTable>(), perPage: a[1] as bool), title: a[2] as String);
     case 'pdf2pptx':

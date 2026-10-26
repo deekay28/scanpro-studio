@@ -202,6 +202,25 @@ void main() {
     expect(repo.storage.file(copy.originalPath).existsSync(), isTrue);
   });
 
+  test('duplicate document copies pages, OCR, tags and search text; size is reported', () async {
+    final doc = await repo.createDocument(title: 'Lease');
+    final page = await repo.addPage(doc.id, source('a.jpg').path);
+    await repo.saveOcr(page, ocr('tenancy agreement'));
+    await repo.setTags(doc.id, ['home']);
+    final copy = await repo.duplicateDocument(doc.id);
+    expect(copy.title, 'Lease (copy)');
+    expect(copy.tags, ['home']);
+    final pages = await repo.getPages(copy.id);
+    expect(pages, hasLength(1));
+    expect(pages.single.originalPath, isNot((await repo.getPages(doc.id)).single.originalPath));
+    expect((await repo.search('tenancy')).map((h) => h.document.id).toSet(), {doc.id, copy.id});
+    expect(await repo.documentSize(copy.id), greaterThan(1000));
+    // Deleting the original leaves the copy intact.
+    await repo.softDelete(doc.id);
+    await repo.purge(doc.id);
+    expect(File(AppStorage.instance.abs(pages.single.originalPath)).existsSync(), isTrue);
+  });
+
   test('trash purge removes files; folders and tags', () async {
     final doc = await repo.createDocument(title: 'Trash me');
     await repo.addPage(doc.id, source('f.jpg').path);

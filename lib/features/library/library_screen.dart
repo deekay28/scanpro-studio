@@ -10,6 +10,9 @@ import '../../core/repository.dart';
 import '../../core/storage.dart';
 import '../../shared/widgets.dart';
 import '../backup/backup_screen.dart';
+import '../backup/backup_service.dart';
+import '../convert/ui/conversion_centre_screen.dart';
+import '../pdf/export_actions.dart';
 import '../pdf/pdf_library.dart';
 import '../scanner/scan_flow.dart';
 import 'document_screen.dart';
@@ -28,9 +31,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   final _search = TextEditingController();
   Timer? _debounce;
   String _query = '';
-  String _filter = 'all'; // all | fav | recent | pdf | sheet | folder:<id> | tag:<name>
+  String _filter = 'all'; // all | fav | recent | scan | pdf | sheet | folder:<id> | tag:<name>
   String _sort = 'updated';
   Future<_LibData>? _future;
+  final _selected = <String>{};
+  List<ScanDocument> _shown = const [];
+  bool get _selecting => _selected.isNotEmpty;
   int _rev = -1;
 
   @override
@@ -52,20 +58,29 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     }
     List<ScanDocument> docs;
     if (_filter == 'fav') {
-      docs = await repo.listDocuments(favouritesOnly: true, sort: _sort);
+      docs = await repo.listDocuments(favouritesOnly: true, sort: _sort == 'size' ? 'updated' : _sort);
     } else if (_filter == 'recent') {
       docs = await repo.listDocuments(recentOpened: true, sort: 'opened', limit: 30);
     } else if (_filter == 'pdf') {
-      docs = await repo.listDocuments(kind: DocKind.pdf.name, sort: _sort);
+      docs = await repo.listDocuments(kind: DocKind.pdf.name, sort: _sort == 'size' ? 'updated' : _sort);
+    } else if (_filter == 'scan') {
+      docs = await repo.listDocuments(kind: DocKind.scan.name, sort: _sort == 'size' ? 'updated' : _sort);
     } else if (_filter == 'sheet') {
-      docs = await repo.listDocuments(kind: DocKind.photoSheet.name, sort: _sort);
+      docs = await repo.listDocuments(kind: DocKind.photoSheet.name, sort: _sort == 'size' ? 'updated' : _sort);
     } else if (_filter.startsWith('folder:')) {
-      docs = await repo.listDocuments(folderId: _filter.substring(7), sort: _sort);
+      docs = await repo.listDocuments(folderId: _filter.substring(7), sort: _sort == 'size' ? 'updated' : _sort);
     } else if (_filter.startsWith('tag:')) {
-      docs = await repo.listDocuments(tag: _filter.substring(4), sort: _sort);
+      docs = await repo.listDocuments(tag: _filter.substring(4), sort: _sort == 'size' ? 'updated' : _sort);
     } else {
-      docs = await repo.listDocuments(sort: _sort);
+      docs = await repo.listDocuments(sort: _sort == 'size' ? 'updated' : _sort);
     }
+    if (_sort == 'size') {
+      final sizes = {for (final d in docs) d.id: await repo.documentSize(d.id)};
+      docs = [...docs]..sort((a, b) => sizes[b.id]!.compareTo(sizes[a.id]!));
+    }
+    final ids = {for (final d in docs) d.id};
+    _selected.removeWhere((id) => !ids.contains(id));
+    _shown = docs;
     return _LibData(docs, null, folders, tags);
   }
 
@@ -131,6 +146,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.swap_horiz),
+            title: const Text('Convert a file'),
+            subtitle: const Text('Word, Excel, PowerPoint, images, HTML or text to PDF and back'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConversionCentreScreen()));
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.unarchive_outlined),
             title: const Text('Import ZIP backup'),
             onTap: () {
@@ -168,7 +192,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(title: Text(d.title, style: const TextStyle(fontWeight: FontWeight.w600))),
+          ListTile(leading: const Icon(Icons.check_circle_outline), title: const Text('Select'), onTap: () => Navigator.pop(ctx, 'select')),
           ListTile(leading: const Icon(Icons.edit), title: const Text('Rename'), onTap: () => Navigator.pop(ctx, 'rename')),
+          ListTile(leading: const Icon(Icons.copy_all_outlined), title: const Text('Duplicate'), onTap: () => Navigator.pop(ctx, 'duplicate')),
           ListTile(
             leading: Icon(d.favourite ? Icons.star : Icons.star_border),
             title: Text(d.favourite ? 'Remove from favourites' : 'Add to favourites'),
@@ -185,6 +211,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           final name = await promptText(context, 'Rename', initial: d.title);
           if (name != null && name.isNotEmpty) await _repo.rename(d.id, name);
         }
+      case 'select':
+        setState(() => _selected.add(d.id));
+      case 'duplicate':
+        final copy = await runBusy(context, 'Duplicating…', (_) => _repo.duplicateDocument(d.id));
+        if (copy != null && mounted) showSnack(context, 'Created "${copy.title}"');
       case 'fav':
         await _repo.setFavourite(d.id, !d.favourite);
       case 'delete':
@@ -203,77 +234,191 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       _rev = repo.revision;
       _future = _loadData();
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Documents'),
-        actions: [
-          IconButton(
-            tooltip: settings.gridView ? 'List view' : 'Grid view',
-            onPressed: () => settings.setGridView(!settings.gridView),
-            icon: Icon(settings.gridView ? Icons.view_list_outlined : Icons.grid_view),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Sort',
-            icon: const Icon(Icons.sort),
-            initialValue: _sort,
-            onSelected: (v) {
-              _sort = v;
-              _reload();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'updated', child: Text('Last modified')),
-              PopupMenuItem(value: 'created', child: Text('Date created')),
-              PopupMenuItem(value: 'name', child: Text('Name')),
-            ],
-          ),
-          IconButton(
-            tooltip: 'Recently deleted',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TrashScreen())),
-            icon: const Icon(Icons.delete_sweep_outlined),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(64),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: SearchBar(
-              controller: _search,
-              hintText: 'Search names, tags and text in documents',
-              leading: const Icon(Icons.search),
-              trailing: [
-                if (_search.text.isNotEmpty)
+    return PopScope(
+      canPop: !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(_selected.clear);
+      },
+      child: Scaffold(
+        appBar: _selecting
+            ? _selectionBar()
+            : AppBar(
+                title: const Text('Documents'),
+                actions: [
                   IconButton(
-                    onPressed: () {
-                      _search.clear();
-                      _query = '';
+                    tooltip: settings.gridView ? 'List view' : 'Grid view',
+                    onPressed: () => settings.setGridView(!settings.gridView),
+                    icon: Icon(settings.gridView ? Icons.view_list_outlined : Icons.grid_view),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Sort',
+                    icon: const Icon(Icons.sort),
+                    initialValue: _sort,
+                    onSelected: (v) {
+                      _sort = v;
                       _reload();
                     },
-                    icon: const Icon(Icons.clear),
-                    tooltip: 'Clear search',
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'updated', child: Text('Last modified')),
+                      PopupMenuItem(value: 'created', child: Text('Date created')),
+                      PopupMenuItem(value: 'name', child: Text('Name')),
+                      PopupMenuItem(value: 'size', child: Text('Size (largest first)')),
+                    ],
                   ),
-              ],
-              onChanged: (v) {
-                setState(() {});
-                _onSearch(v);
-              },
-              elevation: const WidgetStatePropertyAll(0),
-            ),
-          ),
+                  IconButton(
+                    tooltip: 'Recently deleted',
+                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TrashScreen())),
+                    icon: const Icon(Icons.delete_sweep_outlined),
+                  ),
+                ],
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(64),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: SearchBar(
+                      controller: _search,
+                      hintText: 'Search names, tags and text in documents',
+                      leading: const Icon(Icons.search),
+                      trailing: [
+                        if (_search.text.isNotEmpty)
+                          IconButton(
+                            onPressed: () {
+                              _search.clear();
+                              _query = '';
+                              _reload();
+                            },
+                            icon: const Icon(Icons.clear),
+                            tooltip: 'Clear search',
+                          ),
+                      ],
+                      onChanged: (v) {
+                        setState(() {});
+                        _onSearch(v);
+                      },
+                      elevation: const WidgetStatePropertyAll(0),
+                    ),
+                  ),
+                ),
+              ),
+        floatingActionButton: _selecting ? null : FloatingActionButton.extended(onPressed: _showImport, icon: const Icon(Icons.add), label: const Text('New')),
+        body: FutureBuilder<_LibData>(
+          future: _future,
+          builder: (ctx, snap) {
+            final data = snap.data;
+            if (data == null) return const Center(child: CircularProgressIndicator());
+            return Column(children: [
+              if (_query.isEmpty) _filters(data),
+              Expanded(child: data.hits != null ? _results(data.hits!) : _docs(data.docs, settings.gridView)),
+            ]);
+          },
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(onPressed: _showImport, icon: const Icon(Icons.add), label: const Text('New')),
-      body: FutureBuilder<_LibData>(
-        future: _future,
-        builder: (ctx, snap) {
-          final data = snap.data;
-          if (data == null) return const Center(child: CircularProgressIndicator());
-          return Column(children: [
-            if (_query.isEmpty) _filters(data),
-            Expanded(child: data.hits != null ? _results(data.hits!) : _docs(data.docs, settings.gridView)),
-          ]);
-        },
-      ),
     );
+  }
+
+  void _toggle(ScanDocument d) => setState(() => _selected.contains(d.id) ? _selected.remove(d.id) : _selected.add(d.id));
+
+  AppBar _selectionBar() => AppBar(
+        leading: IconButton(icon: const Icon(Icons.close), tooltip: 'Cancel selection', onPressed: () => setState(_selected.clear)),
+        title: Text('${_selected.length} selected'),
+        actions: [
+          IconButton(
+            tooltip: 'Select all',
+            icon: const Icon(Icons.select_all),
+            onPressed: () => setState(() => _selected.addAll(_shown.map((d) => d.id))),
+          ),
+          IconButton(tooltip: 'Move to Recently deleted', icon: const Icon(Icons.delete_outline), onPressed: () => _batch('delete')),
+          PopupMenuButton<String>(
+            onSelected: _batch,
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'zip', child: Text('Export as ZIP')),
+              PopupMenuItem(value: 'share', child: Text('Share PDFs')),
+              PopupMenuItem(value: 'move', child: Text('Move to folder…')),
+              PopupMenuItem(value: 'fav', child: Text('Add to favourites')),
+              PopupMenuItem(value: 'tag', child: Text('Add tag…')),
+              PopupMenuItem(value: 'rename', child: Text('Rename in sequence…')),
+              PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+            ],
+          ),
+        ],
+      );
+
+  Future<void> _batch(String action) async {
+    final repo = _repo;
+    final docs = _shown.where((d) => _selected.contains(d.id)).toList();
+    if (docs.isEmpty) return;
+    switch (action) {
+      case 'delete':
+        for (final d in docs) {
+          await repo.softDelete(d.id);
+        }
+        if (mounted) {
+          showSnack(context, '${docs.length} moved to Recently deleted',
+              action: SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () async {
+                    for (final d in docs) {
+                      await repo.restore(d.id);
+                    }
+                  }));
+        }
+      case 'zip':
+        final path = await runBusy(context, 'Packing ZIP…',
+            (_) => BackupService.exportDocuments(repo, [for (final d in docs) d.id], fileName: 'ScanPro_${docs.length}_documents.zip'));
+        if (path != null) await ExportActions.shareFiles([path]);
+        return;
+      case 'share':
+        final pdfs = docs.where((d) => d.pdfPath != null).toList();
+        if (pdfs.isEmpty) {
+          if (mounted) showSnack(context, 'None of the selected documents is a PDF yet. Export scans as PDF from the document, or use Export as ZIP.');
+          return;
+        }
+        await ExportActions.shareFiles([for (final d in pdfs) repo.storage.abs(d.pdfPath!)]);
+        if (pdfs.length < docs.length && mounted) showSnack(context, '${docs.length - pdfs.length} scan(s) without a PDF were skipped.');
+        return;
+      case 'move':
+        final folders = await repo.listFolders();
+        if (!mounted) return;
+        final target = await showModalBottomSheet<String>(
+          context: context,
+          builder: (ctx) => SafeArea(
+            child: ListView(shrinkWrap: true, children: [
+              ListTile(leading: const Icon(Icons.home_outlined), title: const Text('No folder'), onTap: () => Navigator.pop(ctx, '')),
+              for (final f in folders) ListTile(leading: const Icon(Icons.folder_outlined), title: Text(f.name), onTap: () => Navigator.pop(ctx, f.id)),
+            ]),
+          ),
+        );
+        if (target == null) return;
+        for (final d in docs) {
+          await repo.moveToFolder(d.id, target.isEmpty ? null : target);
+        }
+      case 'fav':
+        for (final d in docs) {
+          await repo.setFavourite(d.id, true);
+        }
+      case 'tag':
+        final tag = await promptText(context, 'Add tag', hint: 'e.g. tax-2026', ok: 'Add');
+        final t = tag?.trim().replaceAll('#', '');
+        if (t == null || t.isEmpty) return;
+        for (final d in docs) {
+          await repo.setTags(d.id, {...d.tags, t}.toList());
+        }
+      case 'rename':
+        final base = await promptText(context, 'Rename ${docs.length} documents', hint: 'Base name, e.g. Invoice', ok: 'Rename');
+        if (base == null || base.trim().isEmpty) return;
+        final width = '${docs.length}'.length;
+        for (var i = 0; i < docs.length; i++) {
+          await repo.rename(docs[i].id, '${base.trim()} ${'${i + 1}'.padLeft(width, '0')}');
+        }
+      case 'duplicate':
+        await runBusy(context, 'Duplicating…', (ctl) async {
+          for (var i = 0; i < docs.length; i++) {
+            ctl.update('Duplicating ${i + 1} of ${docs.length}…', (i + 1) / docs.length);
+            await repo.duplicateDocument(docs[i].id);
+          }
+        });
+    }
+    if (mounted) setState(_selected.clear);
   }
 
   Widget _filters(_LibData data) {
@@ -298,6 +443,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         chip('all', 'All'),
         chip('fav', 'Favourites', icon: Icons.star),
         chip('recent', 'Recent', icon: Icons.history),
+        chip('scan', 'Scans', icon: Icons.document_scanner_outlined),
         chip('pdf', 'PDFs', icon: Icons.picture_as_pdf_outlined),
         chip('sheet', 'Photo sheets', icon: Icons.portrait_outlined),
         for (final f in data.folders) chip('folder:${f.id}', f.name, icon: Icons.folder_outlined, onLong: () => _folderMenu(f)),
@@ -331,14 +477,24 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 96),
         itemCount: docs.length,
         separatorBuilder: (_, __) => const SizedBox(height: 4),
-        itemBuilder: (ctx, i) => DocumentListTile(doc: docs[i], onLongPress: () => _docMenu(docs[i])),
+        itemBuilder: (ctx, i) => DocumentListTile(
+          doc: docs[i],
+          selected: _selected.contains(docs[i].id),
+          onTap: _selecting ? () => _toggle(docs[i]) : null,
+          onLongPress: _selecting ? () => _toggle(docs[i]) : () => _docMenu(docs[i]),
+        ),
       );
     }
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 200, childAspectRatio: 0.68, mainAxisSpacing: 12, crossAxisSpacing: 12),
       itemCount: docs.length,
-      itemBuilder: (ctx, i) => DocumentCard(doc: docs[i], onLongPress: () => _docMenu(docs[i])),
+      itemBuilder: (ctx, i) => DocumentCard(
+        doc: docs[i],
+        selected: _selected.contains(docs[i].id),
+        onTap: _selecting ? () => _toggle(docs[i]) : null,
+        onLongPress: _selecting ? () => _toggle(docs[i]) : () => _docMenu(docs[i]),
+      ),
     );
   }
 
@@ -361,7 +517,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4),
           child: ListTile(
-            leading: SizedBox(width: 44, height: 56, child: ClipRRect(borderRadius: BorderRadius.circular(6), child: StoredImage(h.document.coverThumb, cacheWidth: 120))),
+            leading: SizedBox(
+                width: 44, height: 56, child: ClipRRect(borderRadius: BorderRadius.circular(6), child: StoredImage(h.document.coverThumb, cacheWidth: 120))),
             title: Text(h.document.title, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: h.snippet == null
                 ? Text(h.titleMatch ? 'Name or tag match' : '')
@@ -411,14 +568,17 @@ class _Snippet extends StatelessWidget {
 class DocumentCard extends StatelessWidget {
   final ScanDocument doc;
   final VoidCallback? onLongPress;
-  const DocumentCard({super.key, required this.doc, this.onLongPress});
+  final VoidCallback? onTap; // overrides opening the document
+  final bool selected;
+  const DocumentCard({super.key, required this.doc, this.onLongPress, this.onTap, this.selected = false});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     return Card(
+      shape: selected ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: t.colorScheme.primary, width: 3)) : null,
       child: InkWell(
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DocumentScreen(docId: doc.id))),
+        onTap: onTap ?? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DocumentScreen(docId: doc.id))),
         onLongPress: onLongPress,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
@@ -427,6 +587,11 @@ class DocumentCard extends StatelessWidget {
                   ? Container(color: t.colorScheme.surfaceContainerHighest, child: Icon(Icons.picture_as_pdf, size: 48, color: t.colorScheme.primary))
                   : StoredImage(doc.coverThumb, cacheWidth: 400),
               if (doc.favourite) const Positioned(right: 6, top: 6, child: Icon(Icons.star, color: Colors.amber, shadows: [Shadow(blurRadius: 4)])),
+              if (selected)
+                Positioned(
+                    left: 6,
+                    top: 6,
+                    child: Icon(Icons.check_circle, color: t.colorScheme.primary, shadows: const [Shadow(blurRadius: 4, color: Colors.white)])),
             ]),
           ),
           Padding(
@@ -446,14 +611,18 @@ class DocumentCard extends StatelessWidget {
 class DocumentListTile extends StatelessWidget {
   final ScanDocument doc;
   final VoidCallback? onLongPress;
-  const DocumentListTile({super.key, required this.doc, this.onLongPress});
+  final VoidCallback? onTap; // overrides opening the document
+  final bool selected;
+  const DocumentListTile({super.key, required this.doc, this.onLongPress, this.onTap, this.selected = false});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     return Card(
       child: ListTile(
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DocumentScreen(docId: doc.id))),
+        selected: selected,
+        selectedTileColor: t.colorScheme.primaryContainer.withValues(alpha: 0.5),
+        onTap: onTap ?? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DocumentScreen(docId: doc.id))),
         onLongPress: onLongPress,
         leading: SizedBox(
           width: 44,
@@ -471,7 +640,7 @@ class DocumentListTile extends StatelessWidget {
           relativeTime(doc.updatedAt),
           if (doc.docType != null) doc.docType!,
         ].join(' · ')),
-        trailing: doc.favourite ? const Icon(Icons.star, color: Colors.amber) : null,
+        trailing: selected ? Icon(Icons.check_circle, color: t.colorScheme.primary) : (doc.favourite ? const Icon(Icons.star, color: Colors.amber) : null),
       ),
     );
   }

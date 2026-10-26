@@ -10,6 +10,7 @@ import '../../core/providers.dart';
 import '../../core/storage.dart';
 import '../../shared/widgets.dart';
 import '../library/document_screen.dart';
+import '../docsuite/ui/pdf_suite_menu.dart';
 import '../pdf_editor/pdf_editor_launcher.dart';
 import 'export_actions.dart';
 import 'pdf_library.dart';
@@ -128,6 +129,11 @@ class _PdfViewerScreenState extends ConsumerState<PdfViewerScreen> {
           IconButton(onPressed: _share, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
           IconButton(onPressed: _print, icon: const Icon(Icons.print_outlined), tooltip: 'Print'),
           IconButton(onPressed: _saveDevice, icon: const Icon(Icons.save_alt), tooltip: 'Save to device'),
+          IconButton(
+            onPressed: () => PdfSuiteMenu.show(context, widget.bytes, widget.title, password: widget.password, parentId: widget.parentId),
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More tools',
+          ),
         ],
       ),
       body: Column(children: [

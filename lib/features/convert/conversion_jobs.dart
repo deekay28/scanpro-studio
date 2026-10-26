@@ -206,6 +206,9 @@ class ConversionJobManager extends ChangeNotifier {
     final outDir = p.join(job.dir, 'out');
     final out = Directory(outDir);
     if (await out.exists()) await out.delete(recursive: true);
+    // The final status is set only after clean-up and saving, so a job that
+    // is no longer active has no partial files left and is on disk as-is.
+    var status = JobStatus.failed;
     try {
       final r = await runner(job, outDir, (v, m) {
         job.progress = v;
@@ -215,21 +218,21 @@ class ConversionJobManager extends ChangeNotifier {
       if (r.outputs.isEmpty) throw const FormatException('No output was produced.');
       job.outputs = r.outputs;
       job.warnings = r.warnings;
-      job.status = JobStatus.done;
       job.progress = 1;
       job.message = '${r.outputs.length} file(s) created and checked';
+      status = JobStatus.done;
     } on ConversionCancelled {
-      job.status = JobStatus.cancelled;
       job.message = 'Cancelled';
+      status = JobStatus.cancelled;
       if (await out.exists()) await out.delete(recursive: true);
     } catch (e) {
-      job.status = JobStatus.failed;
       job.error = describeError(e);
       job.message = 'Failed';
       if (await out.exists()) await out.delete(recursive: true);
     } finally {
       job.finished = DateTime.now();
       job._cancel = null;
+      job.status = status;
       await _persist();
       notifyListeners();
     }
@@ -291,6 +294,7 @@ class ConversionJobManager extends ChangeNotifier {
     while (jobs.any((j) => j.active)) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
+    await _chain;
   }
 }
 

@@ -6,6 +6,8 @@ import '../../core/ocr_models.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets.dart';
 import '../book/book_scan_screen.dart';
+import '../convert/ui/conversion_centre_screen.dart';
+import '../docsuite/ui/pdf_suite_menu.dart';
 import '../library/library_screen.dart';
 import '../ocr/quick_ocr_screen.dart';
 import '../passport/passport_studio_screen.dart';
@@ -29,6 +31,10 @@ class HomeScreen extends ConsumerWidget {
       (Icons.text_fields, 'Extract text', 'On-device OCR', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuickOcrScreen()))),
       (Icons.merge_type, 'Merge PDFs', 'Combine files', () => PdfTools.merge(context, ref)),
       (Icons.compress, 'Compress PDF', 'Email / print', () => PdfTools.pickAndCompress(context, ref)),
+      (Icons.swap_horiz, 'Convert', 'PDF ⇄ Office, images', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConversionCentreScreen()))),
+      (Icons.chrome_reader_mode_outlined, 'Read PDF', 'Night & book modes', () => PdfSuiteMenu.pickThen(context, 'read')),
+      (Icons.edit_note, 'Fill & sign', 'PDF forms', () => PdfSuiteMenu.pickThen(context, 'fill')),
+      (Icons.compare, 'Compare PDFs', 'Find changes', () => PdfSuiteMenu.pickThen(context, 'compare')),
     ];
     return Scaffold(
       body: SafeArea(

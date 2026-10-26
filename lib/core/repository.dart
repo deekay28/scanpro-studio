@@ -444,6 +444,44 @@ class DocumentRepository extends ChangeNotifier {
 
   Future<DocPage> duplicatePage(DocPage page) => copyPageTo(page, page.docId, position: page.position + 1);
 
+  /// A full, independent copy of a document (its PDF file, pages, OCR,
+  /// annotations, tags and search text) in the same folder.
+  Future<ScanDocument> duplicateDocument(String id) async {
+    final d = await getDocument(id);
+    if (d == null) throw StateError('Document not found');
+    final copy = await createDocument(
+      title: '${d.title} (copy)',
+      kind: d.kind,
+      folderId: d.folderId,
+      docType: d.docType,
+      parentId: d.parentId,
+      pageCount: d.pdfPath != null ? d.pageCount : 0,
+    );
+    if (d.pdfPath != null) {
+      final rel = await _copyRel(d.pdfPath, copy.id, '', p.basename(d.pdfPath!));
+      await db.update('documents', {'pdf_path': rel}, where: 'id = ?', whereArgs: [copy.id]);
+      final texts = await pdfText(id);
+      if (texts.isNotEmpty) await indexPdfText(copy.id, texts);
+    }
+    for (final page in await getPages(id)) {
+      await copyPageTo(page, copy.id);
+    }
+    if (d.tags.isNotEmpty) await setTags(copy.id, d.tags);
+    changed();
+    return (await getDocument(copy.id))!;
+  }
+
+  /// Storage used by a document's files (PDF, page images, OCR data).
+  Future<int> documentSize(String id) async {
+    final dir = Directory(storage.abs(storage.docDir(id)));
+    if (!await dir.exists()) return 0;
+    var total = 0;
+    await for (final e in dir.list(recursive: true)) {
+      if (e is File) total += await e.length();
+    }
+    return total;
+  }
+
   Future<void> rotatePage(DocPage page, int delta) =>
       updatePageEdit(page, page.edit.copyWith(rotation: (page.edit.rotation + delta + 360) % 360));
 

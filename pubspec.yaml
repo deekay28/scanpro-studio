@@ -46,6 +46,7 @@ dependencies:
   ffi: ^2.2.0
   xml: ^6.6.1
   html: ^0.15.7
+  flutter_tts: ^4.2.5
 dev_dependencies:
   flutter_test:
     sdk: flutter

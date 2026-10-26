@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../backup/backup_screen.dart';
 import '../book/book_scan_screen.dart';
+import '../convert/ui/conversion_centre_screen.dart';
+import '../docsuite/ui/pdf_suite_menu.dart';
 import '../ocr/quick_ocr_screen.dart';
 import '../passport/calibration_screen.dart';
 import '../pdf/pdf_tools_screen.dart';
@@ -28,11 +30,34 @@ class ToolsScreen extends ConsumerWidget {
           (Icons.call_split, 'Split / extract', 'By page ranges', () => PdfTools.pickThen(context, ref, 'split')),
           (Icons.view_module_outlined, 'Organise pages', 'Reorder, rotate, delete, insert', () => PdfTools.pickThen(context, ref, 'organize')),
           (Icons.compress, 'Compress PDF', 'Email, messaging or print', () => PdfTools.pickThen(context, ref, 'compress')),
-          (Icons.lock_outline, 'Protect PDF', 'AES-256 password', () => PdfTools.pickThen(context, ref, 'protect')),
+          (Icons.lock_outline, 'Protect PDF', 'AES-256 password and permissions', () => PdfSuiteMenu.pickThen(context, 'protect')),
           (Icons.lock_open, 'Remove password', 'Needs the current password', () => PdfTools.pickThen(context, ref, 'unlock')),
           (Icons.image_outlined, 'PDF to images', 'PNG pages or editable scan', () => PdfTools.pickThen(context, ref, 'images')),
           (Icons.text_snippet_outlined, 'PDF text', 'Extract the text layer', () => PdfTools.pickThen(context, ref, 'text')),
           (Icons.visibility_outlined, 'View PDF', 'Preview, print, share', () => PdfTools.pickThen(context, ref, 'view')),
+        ]
+      ),
+      (
+        'Convert',
+        [
+          (Icons.swap_horiz, 'Conversion centre', 'PDF ⇄ Word, Excel, PowerPoint, images, text', () => push(const ConversionCentreScreen())),
+          (Icons.pending_actions_outlined, 'Conversion jobs', 'Progress, history and converted files', () => push(const ConversionJobsScreen())),
+        ]
+      ),
+      (
+        'Read, review & secure',
+        [
+          (Icons.chrome_reader_mode_outlined, 'Read PDF', 'Night, book and two-page modes, read aloud', () => PdfSuiteMenu.pickThen(context, 'read')),
+          (Icons.compare, 'Compare PDFs', 'Text changes and scanned-page differences', () => PdfSuiteMenu.pickThen(context, 'compare')),
+          (Icons.edit_note, 'Fill & sign form', 'Fill fields, sign signature areas', () => PdfSuiteMenu.pickThen(context, 'fill')),
+          (Icons.add_box_outlined, 'Create fillable form', 'Add fields to any PDF', () => PdfSuiteMenu.pickThen(context, 'form')),
+          (Icons.format_list_numbered, 'Headers, footers & watermark', 'Page numbers, dates, logos', () => PdfSuiteMenu.pickThen(context, 'stamp')),
+          (Icons.format_color_fill, 'Redact', 'Permanently remove sensitive content', () => PdfSuiteMenu.pickThen(context, 'redact')),
+          (Icons.tune, 'Compress (keep text)', 'Size profiles that keep text, links and forms', () => PdfSuiteMenu.pickThen(context, 'compress')),
+          (Icons.link, 'Links', 'Add, edit, remove', () => PdfSuiteMenu.pickThen(context, 'links')),
+          (Icons.sticky_note_2_outlined, 'Annotations', 'Summary, XFDF/JSON, flatten', () => PdfSuiteMenu.pickThen(context, 'annotations')),
+          (Icons.bookmarks_outlined, 'Bookmarks', 'Edit the outline', () => PdfSuiteMenu.pickThen(context, 'bookmarks')),
+          (Icons.note_add_outlined, 'Page tools', 'Lined/grid pages, replace, repair', () => PdfSuiteMenu.pickThen(context, 'pages')),
         ]
       ),
       (

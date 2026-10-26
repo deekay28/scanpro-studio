@@ -166,7 +166,7 @@ class PdfFormService {
               for (var i = 0; i < nf.options.length; i++) sf.PdfRadioButtonListItem(nf.options[i], nf.bounds.translate(0, i * (nf.bounds.height + 6))),
             ]),
           FormFieldKind.combo => sf.PdfComboBoxField(page, name, nf.bounds,
-              items: [for (final o in nf.options) sf.PdfListFieldItem(o, o)], selectedIndex: nf.options.indexOf(nf.value) < 0 ? null : nf.options.indexOf(nf.value)),
+              items: [for (final o in nf.options) sf.PdfListFieldItem(o, o)], selectedIndex: nf.options.contains(nf.value) ? nf.options.indexOf(nf.value) : null),
           FormFieldKind.signature => sf.PdfSignatureField(page, name, bounds: nf.bounds, tooltip: nf.label),
           _ => sf.PdfTextBoxField(page, name, nf.bounds,
               text: nf.value, tooltip: nf.label, maxLength: nf.maxLength, multiline: nf.multiline, font: sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 10)),
@@ -308,6 +308,232 @@ class PdfAnnotationService {
     final d = _open(bytes, password);
     try {
       d.importAnnotation(data, _f(format));
+      return _save(d);
+    } finally {
+      d.dispose();
+    }
+  }
+
+  /// A copy whose annotations (comments, highlights, stamps, drawings) are
+  /// merged into the page content and can no longer be edited or removed.
+  /// Form fields are flattened too when [forms] is set. Links stay links.
+  Uint8List flatten(Uint8List bytes, {String? password, bool forms = false}) {
+    final d = _open(bytes, password);
+    try {
+      for (var i = 0; i < d.pages.count; i++) {
+        final a = d.pages[i].annotations;
+        for (var k = 0; k < a.count; k++) {
+          final an = a[k];
+          // Links and form-field widgets are not flattened here.
+          final link = an is sf.PdfUriAnnotation || an is sf.PdfDocumentLinkAnnotation || an is sf.PdfTextWebLink;
+          if (!link && !an.runtimeType.toString().contains('Widget')) an.flatten();
+        }
+      }
+      if (forms) d.form.flattenAllFields();
+      return _save(d);
+    } finally {
+      d.dispose();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks (outline)
+// ---------------------------------------------------------------------------
+
+class OutlineEntry {
+  final String title;
+  final int? page; // 0-based
+  final int level;
+  final List<int> path; // indexes from the top level, for removal
+  const OutlineEntry(this.title, this.page, this.level, this.path);
+}
+
+class PdfOutlineService {
+  const PdfOutlineService();
+
+  List<OutlineEntry> list(Uint8List bytes, {String? password}) {
+    final d = _open(bytes, password);
+    try {
+      final out = <OutlineEntry>[];
+      void walk(sf.PdfBookmarkBase b, int level, List<int> path) {
+        for (var i = 0; i < b.count; i++) {
+          final bm = b[i];
+          final pg = bm.destination?.page;
+          out.add(OutlineEntry(bm.title, pg == null ? null : d.pages.indexOf(pg), level, [...path, i]));
+          walk(bm, level + 1, [...path, i]);
+        }
+      }
+
+      walk(d.bookmarks, 0, const []);
+      return out;
+    } finally {
+      d.dispose();
+    }
+  }
+
+  /// Adds a bookmark to [page] (0-based), at the top level or under the
+  /// entry at [parentPath].
+  Uint8List add(Uint8List bytes, String title, int page, {List<int>? parentPath, String? password}) {
+    if (title.trim().isEmpty) throw const FormatException('Enter a title.');
+    final d = _open(bytes, password);
+    try {
+      if (page < 0 || page >= d.pages.count) throw FormatException('Choose a page from 1 to ${d.pages.count}.');
+      sf.PdfBookmarkBase parent = d.bookmarks;
+      for (final i in parentPath ?? const <int>[]) {
+        parent = parent[i];
+      }
+      final bm = parent.add(title.trim());
+      bm.destination = sf.PdfDestination(d.pages[page]);
+      return _save(d);
+    } finally {
+      d.dispose();
+    }
+  }
+
+  /// Removes the entry at [path] and its children. The outline is rebuilt
+  /// (removing a nested entry in place damages its parent's title).
+  Uint8List remove(Uint8List bytes, List<int> path, {String? password}) {
+    final entries = list(bytes, password: password);
+    bool under(List<int> p) => p.length >= path.length && List.generate(path.length, (i) => p[i] == path[i]).every((x) => x);
+    final keep = entries.where((e) => !under(e.path)).toList();
+    final d = _open(bytes, password);
+    try {
+      d.bookmarks.clear();
+      final stack = <sf.PdfBookmarkBase>[d.bookmarks];
+      for (final e in keep) {
+        while (stack.length > e.level + 1) {
+          stack.removeLast();
+        }
+        final bm = stack.last.add(e.title);
+        if (e.page != null && e.page! < d.pages.count) bm.destination = sf.PdfDestination(d.pages[e.page!]);
+        stack.add(bm);
+      }
+      return _save(d);
+    } finally {
+      d.dispose();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Headers, footers, page numbers, watermarks, background tint
+// ---------------------------------------------------------------------------
+
+enum StampAlign { left, center, right }
+
+class StampOptions {
+  /// Header and footer texts by position. Tokens: {page}, {pages}, {date},
+  /// {title}, {file}.
+  final Map<StampAlign, String> header;
+  final Map<StampAlign, String> footer;
+  final double fontSize;
+  final double margin; // distance from the page edge, points
+  final int color; // ARGB
+  final List<int>? pages; // 0-based; null = all pages
+  final int firstNumber; // number shown on the first page
+  final String title;
+  final String fileName;
+  final String watermarkText;
+  final double watermarkSize;
+  final double watermarkAngle; // degrees
+  final double watermarkOpacity;
+  final int watermarkColor;
+  final Uint8List? watermarkImage; // PNG/JPEG
+  final double imageScale; // fraction of the page width
+  final double imageOpacity;
+  final int? backgroundTint; // ARGB, blended (multiply) over the page
+  const StampOptions({
+    this.header = const {},
+    this.footer = const {},
+    this.fontSize = 10,
+    this.margin = 24,
+    this.color = 0xFF444444,
+    this.pages,
+    this.firstNumber = 1,
+    this.title = '',
+    this.fileName = '',
+    this.watermarkText = '',
+    this.watermarkSize = 60,
+    this.watermarkAngle = -45,
+    this.watermarkOpacity = 0.15,
+    this.watermarkColor = 0xFFB71C1C,
+    this.watermarkImage,
+    this.imageScale = 0.5,
+    this.imageOpacity = 0.15,
+    this.backgroundTint,
+  });
+}
+
+class PdfStampService {
+  const PdfStampService();
+
+  static String expand(String t, int page, int pages, StampOptions o, DateTime now) => t
+      .replaceAll('{page}', '$page')
+      .replaceAll('{pages}', '$pages')
+      .replaceAll('{date}', '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}')
+      .replaceAll('{title}', o.title)
+      .replaceAll('{file}', o.fileName);
+
+  /// Adds the stamps on top of the existing content (nothing is removed).
+  /// [unicodeFont] is used for the text so any language can be printed.
+  Uint8List apply(Uint8List bytes, StampOptions o, {String? password, Uint8List? unicodeFont, DateTime? now}) {
+    final d = _open(bytes, password);
+    try {
+      final time = now ?? DateTime.now();
+      final font = unicodeFont != null ? sf.PdfTrueTypeFont(unicodeFont, o.fontSize) : sf.PdfStandardFont(sf.PdfFontFamily.helvetica, o.fontSize);
+      final wmFont = unicodeFont != null ? sf.PdfTrueTypeFont(unicodeFont, o.watermarkSize) : sf.PdfStandardFont(sf.PdfFontFamily.helvetica, o.watermarkSize);
+      sf.PdfColor col(int argb) => sf.PdfColor((argb >> 16) & 255, (argb >> 8) & 255, argb & 255);
+      final brush = sf.PdfSolidBrush(col(o.color));
+      final targets = o.pages ?? [for (var i = 0; i < d.pages.count; i++) i];
+      final total = d.pages.count + o.firstNumber - 1;
+      final image = o.watermarkImage == null ? null : sf.PdfBitmap(o.watermarkImage!);
+      for (final i in targets) {
+        if (i < 0 || i >= d.pages.count) continue;
+        final page = d.pages[i];
+        final g = page.graphics;
+        final size = g.clientSize;
+        if (o.backgroundTint != null) {
+          g.save();
+          g.setTransparency(1, mode: sf.PdfBlendMode.multiply);
+          g.drawRectangle(brush: sf.PdfSolidBrush(col(o.backgroundTint!)), bounds: Offset.zero & size);
+          g.restore();
+        }
+        if (image != null) {
+          g.save();
+          g.setTransparency(o.imageOpacity);
+          final w = size.width * o.imageScale, h = w * image.height / image.width;
+          g.drawImage(image, Rect.fromLTWH((size.width - w) / 2, (size.height - h) / 2, w, h));
+          g.restore();
+        }
+        if (o.watermarkText.trim().isNotEmpty) {
+          g.save();
+          g.setTransparency(o.watermarkOpacity);
+          g.translateTransform(size.width / 2, size.height / 2);
+          g.rotateTransform(o.watermarkAngle);
+          final text = expand(o.watermarkText, i + o.firstNumber, total, o, time);
+          final m = wmFont.measureString(text);
+          g.drawString(text, wmFont, brush: sf.PdfSolidBrush(col(o.watermarkColor)), bounds: Rect.fromLTWH(-m.width / 2, -m.height / 2, m.width + 2, m.height + 2));
+          g.restore();
+        }
+        void line(Map<StampAlign, String> parts, bool top) {
+          parts.forEach((align, raw) {
+            if (raw.trim().isEmpty) return;
+            final text = expand(raw, i + o.firstNumber, total, o, time);
+            final m = font.measureString(text);
+            final x = switch (align) {
+              StampAlign.left => o.margin,
+              StampAlign.center => (size.width - m.width) / 2,
+              StampAlign.right => size.width - o.margin - m.width,
+            };
+            final y = top ? o.margin : size.height - o.margin - m.height;
+            g.drawString(text, font, brush: brush, bounds: Rect.fromLTWH(x, y, m.width + 2, m.height + 2));
+          });
+        }
+
+        line(o.header, true);
+        line(o.footer, false);
+      }
       return _save(d);
     } finally {
       d.dispose();

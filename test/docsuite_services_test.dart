@@ -179,6 +179,58 @@ void main() {
     expect(vc.regions.single.overlaps(const Rect.fromLTWH(30, 20, 30, 20)), isTrue);
     expect(compareRender(0, p1, p1, w, h), isNull);
   });
+
+  test('headers/footers, page numbers with range, text + image watermark and tint add content without removing any', () {
+    const svc = PdfStampService();
+    final src = textPdf(['Alpha page body', 'Beta page body', 'Gamma page body']);
+    final logo = img.Image(width: 60, height: 30)..clear(img.ColorRgb8(200, 30, 30));
+    final out = svc.apply(
+      src,
+      StampOptions(
+        header: const {StampAlign.left: '{title}', StampAlign.right: '{date}'},
+        footer: const {StampAlign.center: 'Page {page} of {pages}'},
+        pages: const [1, 2],
+        title: 'Quarterly ₹ report',
+        watermarkText: 'DRAFT',
+        watermarkImage: Uint8List.fromList(img.encodePng(logo)),
+        backgroundTint: 0xFFFFF8E1,
+      ),
+      unicodeFont: freeSans,
+      now: DateTime(2026, 3, 9),
+    );
+    final s = op(out);
+    final p0 = s.pageText(0), p1 = s.pageText(1), p2 = s.pageText(2);
+    s.close();
+    expect(p0, isNot(contains('Page 1 of 3')), reason: 'page 1 is outside the range');
+    expect(p1, allOf(contains('Beta page body'), contains('Page 2 of 3'), contains('Quarterly ₹ report'), contains('09/03/2026'), contains('DRAFT')));
+    expect(p2, allOf(contains('Gamma page body'), contains('Page 3 of 3')));
+    expect(PdfStampService.expand('{page}/{pages} {file}', 4, 9, const StampOptions(fileName: 'a.pdf'), DateTime(2026)), '4/9 a.pdf');
+  });
+
+  test('flatten annotations copy keeps links and form fields; bookmarks can be added and removed', () {
+    final src = sfDoc((d) {
+      final page = d.pages.add();
+      page.graphics.drawString('Annotated', sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 12), bounds: const Rect.fromLTWH(40, 40, 200, 20));
+      page.annotations.add(sf.PdfRectangleAnnotation(const Rect.fromLTWH(40, 100, 120, 60), 'Box note', color: sf.PdfColor(255, 0, 0)));
+      page.annotations.add(sf.PdfUriAnnotation(bounds: const Rect.fromLTWH(40, 200, 100, 14), uri: 'https://example.org'));
+      d.form.fields.add(sf.PdfTextBoxField(page, 'name', const Rect.fromLTWH(40, 300, 200, 20)));
+      d.pages.add();
+    });
+    final flat = const PdfAnnotationService().flatten(src);
+    final s = op(flat);
+    final kinds = s.annotations().map((a) => a.subtype).toList();
+    s.close();
+    expect(kinds, isNot(contains('Square')), reason: 'rectangle annotation became page content');
+    expect(kinds, contains('Link'));
+    expect(const PdfFormService().read(flat).fields.single.name, 'name');
+    const ol = PdfOutlineService();
+    var b = ol.add(flat, 'Intro', 0);
+    b = ol.add(b, 'Details', 1, parentPath: const [0]);
+    expect(ol.list(b).map((e) => (e.title, e.page, e.level)), [('Intro', 0, 0), ('Details', 1, 1)]);
+    b = ol.remove(b, const [0, 0]);
+    expect(ol.list(b).map((e) => e.title), ['Intro']);
+    expect(() => ol.add(b, 'Bad', 7), throwsFormatException);
+  });
 }
 
 class PdfiumModuleSetup {

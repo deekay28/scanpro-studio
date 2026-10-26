@@ -57,6 +57,13 @@ def manifest():
              '    </queries>\n')
         idx = s.rfind('</manifest>')
         s = s[:idx] + q + s[idx:]
+    if 'android.intent.action.TTS_SERVICE' not in s:
+        # Android 11+ package visibility: lets the reader find the device's
+        # text-to-speech engine (read aloud).
+        s = s.replace('    <queries>\n', '    <queries>\n'
+                      '        <intent>\n'
+                      '            <action android:name="android.intent.action.TTS_SERVICE" />\n'
+                      '        </intent>\n', 1)
     write(p, s)
 
     # Release-only manifest: remove INTERNET even if a library requests it.
