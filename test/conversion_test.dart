@@ -317,4 +317,38 @@ void main() {
     expect(text, allOf(contains('Overview'), contains('Toner')));
     expect(DocModel([DocParagraph([DocRun('a')])]).plainText, 'a\n');
   });
+
+  test('ACCEPTANCE 14: every Office output reopens in independent readers (python-docx/openpyxl/python-pptx, LibreOffice when installed)', () {
+    final pages = contentOf(reportPdf());
+    final tables = [for (final p in pages) ...const TableExtractionService().extract(p)];
+    final outputs = <String, (Uint8List, String)>{
+      'PDF → Word (editable)': (writeDocx(buildDoc(pages, title: 'Report').doc), 'docx'),
+      'PDF → Word (layout)': (writeDocx(buildDoc(pages, mode: WordMode.layout, title: 'Report').doc), 'docx'),
+      'PDF → Excel': (writeXlsx(tablesToSheets(tables)), 'xlsx'),
+      'PDF → PowerPoint (editable)': (writePptx(pagesToEditableSlides(pages, title: 'Report').deck), 'pptx'),
+      'PowerPoint → Excel': (writeXlsx(pptxToSheets(readPptx(File('${fixtures.path}/review.pptx').readAsBytesSync())).sheets), 'xlsx'),
+      'Excel → PowerPoint': (writePptx(sheetsToDeck(readXlsx(File('${fixtures.path}/sales.xlsx').readAsBytesSync()), title: 'Sales')), 'pptx'),
+    };
+    final lo = hasLibreOffice;
+    for (final e in outputs.entries) {
+      final (bytes, ext) = e.value;
+      final summary = officeSummary(bytes, ext);
+      expect(summary, isNotEmpty, reason: e.key);
+      // And back through the app's own readers.
+      switch (ext) {
+        case 'docx':
+          expect(readDocx(bytes).plainText, contains('Annual Report 2024'), reason: e.key);
+        case 'xlsx':
+          expect(readXlsx(bytes), isNotEmpty, reason: e.key);
+        case 'pptx':
+          expect(readPptx(bytes).slides, isNotEmpty, reason: e.key);
+      }
+      if (lo) {
+        final pdf = libreOfficeToPdf(bytes, ext)!;
+        expect(op(pdf).pageCount, greaterThan(0), reason: '${e.key} opened by LibreOffice');
+      }
+    }
+    // ignore: avoid_print
+    print('ACCEPTANCE 14: ${outputs.length} outputs checked; LibreOffice ${lo ? 'available and used' : 'not installed (skipped that part)'}');
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }

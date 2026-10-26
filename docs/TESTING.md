@@ -68,6 +68,38 @@ PDF and a password-protected PDF.
 11. Password PDF: wrong password is rejected; a PDF that forbids editing shows "Editing not allowed".
 12. 300+ page PDF: page navigation and thumbnails stay responsive; saving completes.
 
+## Workflow H – Conversion Centre (see docs/DOCUMENT_SUITE.md)
+1. Tools → Conversion centre → PDF to Word → choose a 3-page office PDF → Editable → Convert. The job
+   screen shows progress, then Done with notes. Preview, then Share → open in Word / Google Docs.
+2. Repeat with Keep layout, and with a scanned PDF (OCR on, then OCR off: the job fails with "Turn on OCR").
+3. PDF to Excel with a bank statement → Review tables → merge two columns, delete one, fix a cell → Export
+   XLSX → open in Excel/Sheets: numbers are numbers, flagged cells highlighted.
+4. PDF to images: PNG, 300 dpi, pages "2-3", ZIP → estimated size shown → open the ZIP.
+5. Select 5 PDFs for PDF to text → one job; cancel it midway → no partial files; Retry → done.
+6. Start a large conversion, swipe the app away, reopen → job shows Interrupted → Retry.
+7. Password PDF → asked for the password when chosen; wrong password re-asked.
+8. Word/Excel/PowerPoint → PDF, PowerPoint → Excel (chart data sheet), Excel → PowerPoint (chart slide);
+   open outputs in Microsoft Office apps and note anything that looks different.
+
+## Workflow I – Reader, compare, forms, security
+1. Any PDF → ⋮ More tools → Read: switch layouts, Dark, Sepia, a custom colour; thumbnails, contents,
+   bookmark a page, search a word, Go to page, Copy text, Read aloud (speech starts, stops on tap).
+   Close and reopen: it resumes at the same page; Recently read lists it.
+2. Compare: original vs a version with an edited sentence and a changed amount → changes listed,
+   highlighted on both sides, scrolling synchronised; export the report as PDF.
+3. Fill form on a government form PDF → fill, sign the signature field → Save filled → open in another
+   app: values present and still editable. Save flattened → not editable.
+4. Create fillable form: add a text field, checkbox, dropdown and signature field → open elsewhere.
+5. Links: add a web link and a page link; edit; remove; undo. Annotations: export XFDF, import into a
+   copy, Flatten copy. Bookmarks: add, add nested, remove.
+6. Headers, footers & watermark: page numbers on pages 2–end, date, logo watermark → Preview → Apply.
+7. Redact: Find a name → marks on all pages → Redact → "Redaction verified" → open the copy in another
+   app and search for the name: not found; select text under the black box: nothing.
+8. Protect with permissions (printing only) → another app asks for the password; editing is blocked.
+9. Compress: try Balanced and Email on a photo-heavy PDF → sizes shown → Use → text still selectable.
+10. Page tools: insert 2 lined pages at the end, replace page 1 from another PDF, Repair.
+11. Documents: long-press → Select → select all → Export as ZIP; sequential rename; duplicate; sort by size.
+
 ## Edge cases
 - Airplane mode: everything except Smart scan module download works.
 - Storage nearly full: export shows "Not enough storage space".

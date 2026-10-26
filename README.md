@@ -1,6 +1,6 @@
 # ScanPro Studio
 
-An offline-first Android document scanner, PDF toolkit, OCR tool and passport/ID photo print studio, built with Flutter.
+An offline-first Android document scanner, PDF toolkit and editor, document converter, OCR tool and passport/ID photo print studio, built with Flutter.
 
 - **No account, no cloud, no ads, no analytics.** The release APK doesn't request the `INTERNET` permission at all.
 - **Non-destructive.** The original capture is always stored byte-for-byte. Crops, filters and adjustments are recipes that can be changed or reverted at any time.
@@ -77,6 +77,21 @@ Full details, SDK evaluation and the complete/partial/unsupported checklist: **[
 | Undo/redo, compare with original, autosaved drafts with recovery, save as new version, validation on export | ✅ | |
 | Password-protected PDFs and edit restrictions | ✅ | Encryption kept by default; restrictions are respected. |
 
+### Document suite: conversions, reader, compare, forms, security
+Full matrix (complete/partial/unsupported), architecture, licensing and acceptance results: **[docs/DOCUMENT_SUITE.md](docs/DOCUMENT_SUITE.md)**.
+
+| Feature | Status | Notes |
+|---|---|---|
+| Conversion Centre: PDF → Word/Excel/PowerPoint/JPG/PNG/TIFF/TXT/HTML/CSV; images, Word, Excel, PowerPoint, HTML, text → PDF; PowerPoint ⇄ Excel | ✅ / 🟡 | Office → PDF is rendered by the app and approximates fonts and complex layout |
+| Batch jobs with progress, cancel, retry, history, recovery after the app is killed; outputs validated before success | ✅ | |
+| Table review (fix columns) before Excel/CSV export | ✅ | |
+| Reader: continuous/single/two-page/book, night/sepia/custom, outline, bookmarks, search, read aloud, resume | ✅ | |
+| Compare two PDFs (text changes, values, page changes; visual for scans) with report | ✅ | |
+| Fill and create forms, links, annotation export/import/flatten, bookmarks, headers/footers/watermarks | ✅ | XFA forms not supported |
+| True redaction with verification; AES-256 protection with permissions | ✅ | |
+| Compression profiles that keep text, links and forms; lined/grid pages, replace pages, repair | ✅ | |
+| PDF/A, AI tools, subfolders, receiving files from the share sheet | ⏳ | |
+
 ### OCR & intelligence (on-device)
 | Feature | Status | Notes |
 |---|---|---|
@@ -110,7 +125,8 @@ Full details, SDK evaluation and the complete/partial/unsupported checklist: **[
 ### Organisation, security, extras
 | Feature | Status |
 |---|---|
-| Folders, tags, favourites, recent, grid/list, sort | ✅ |
+| Folders, tags, favourites, recent, grid/list, sort (incl. size), type filters | ✅ |
+| Multi-select: delete, move, favourite, tag, sequential rename, duplicate, share, ZIP export | ✅ |
 | Recently deleted with configurable retention (7–90 days) | ✅ |
 | Duplicate document warning on save | ✅ |
 | Annotations: pen, highlighter, text, signatures (saved for reuse), move/resize, undo. Burned into exports | ✅ |
@@ -120,7 +136,7 @@ Full details, SDK evaluation and the complete/partial/unsupported checklist: **[
 | Local backup/restore ZIP; export a document as ZIP | ✅ |
 | Version lineage (derived PDFs keep a parent reference) | 🟡 |
 | WebDAV/cloud backup | ⏳ (deliberately not included; share the backup ZIP to a storage app instead) |
-| Document comparison | ⏳ |
+| Document comparison | ✅ (see Document suite) |
 | Material 3, light/dark/system theme, phone/tablet layouts (navigation rail ≥ 840 dp), semantics labels/tooltips | ✅ |
 
 ---
@@ -146,6 +162,10 @@ lib/
     pdf/                       PDF engine (Syncfusion), tools, export, viewer
     pdf_editor/                in-place PDF editor: engine interface, PDFium engine (worker isolate),
                                edit model (undo/redo, drafts), workspace UI, signatures, OCR overlay
+    convert/                   Conversion Centre: conversion service, job queue, OOXML (DOCX/XLSX/PPTX)
+                               readers/writers, table extraction, Office/HTML/text → PDF, UI
+    docsuite/                  shared document services (forms, links, annotations, bookmarks, stamps,
+                               security, comparison), reader, compare and tool screens
     ocr/                       ML Kit OCR, text analysis, OCR UI
     passport/                  presets, layout engine, renderer, studio UI, calibration
     book/  annotate/  qr/  security/  backup/  settings/  tools/  home/  shell/
@@ -187,6 +207,8 @@ All versions are constrained in `pubspec.yaml`. CI resolves the newest compatibl
 | cryptography | AES-256-GCM vault encryption |
 | archive 3.x | backup ZIP |
 | qr_flutter | QR generation |
+| xml, html | OOXML reading/writing, HTML → PDF |
+| flutter_tts (MIT) | read aloud in the reader (Android's built-in speech engine, offline) |
 | sqflite_common_ffi (dev) | repository tests on desktop |
 
 Font: GNU FreeSans (GPLv3 with font exception) is bundled for the invisible OCR text layer. It covers Latin and Devanagari.
@@ -248,6 +270,10 @@ PDF editor tests load the PDFium library that the `pdfium_dart` build hook downl
 | `test/widget_test.dart` | widget smoke tests |
 | `test/pdf_editor_test.dart` | **PDF editor acceptance tests** on 10 fixture types (generated, embedded font, subset font, mixed styles, scanned, Hindi+English, multi-page, images/links/forms, password, 300 pages), text layout, edit model and undo/redo |
 | `test/pdf_editor_widget_test.dart` | the editor workspace with the real PDFium worker: render, select, tools, page navigation, undo/redo, draft autosave, export |
+| `test/ooxml_test.dart`, `test/conversion_test.dart` | DOCX/XLSX/PPTX writers and readers; **conversion acceptance tests 1–7 and 14** (validated with python-docx/openpyxl/python-pptx and LibreOffice when installed) |
+| `test/conversion_jobs_test.dart` | **acceptance 8, 9, 13, 15**: batch jobs, passwords, OCR path, 200-page document, cancellation, recovery, validation, table review |
+| `test/docsuite_services_test.dart`, `test/security_tools_test.dart` | **acceptance 9–12**: forms, links, annotations, bookmarks, headers/footers, protection, comparison, true redaction |
+| `test/docsuite_widget_test.dart` | Conversion Centre, table review and reader screens |
 
 Camera, ML Kit, biometrics and the print dialog need a real device. They're covered by the manual test checklist in `docs/TESTING.md`.
 
@@ -289,6 +315,7 @@ Scripts that ML Kit doesn't support (Tamil, Bengali, Gujarati, …) would need a
 
 - **Build status:** see `docs/BUILD_STATUS.md` for the latest CI results.
 - **PDF editor:** see the limitations in `docs/PDF_EDITOR.md` §5 (Hindi shaping, font embedding size, reflow scope).
+- **Conversions and document tools:** see `docs/DOCUMENT_SUITE.md` §7 (Office layout fidelity, table detection, rotated pages, jobs stop if Android kills the app).
 - Pure-Dart processing of 20+ MP photos takes roughly 1–4 s per page on mid-range phones. Processed pages are capped at 2800 px by default (configurable), and originals keep full resolution.
 - Smart scan needs Google Play services. Without it, use the Pro camera.
 - Curved-page flattening is approximate (see Book mode).
