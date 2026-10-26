@@ -44,12 +44,15 @@ String _norm(String s) => s.replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'
 ({Set<PdfLine> lines, String header, String footer}) detectRunningLines(List<PageContent> pages) {
   final out = <PdfLine>{};
   if (pages.length < 2) return (lines: out, header: '', footer: '');
+  // Short documents need an exact repeat; longer ones tolerate changing
+  // numbers (page numbers).
+  String norm(String t) => pages.length < 3 ? t.trim().toLowerCase() : _norm(t);
   final counts = <String, int>{};
   for (final p in pages) {
     final seen = <String>{};
     for (final l in p.lines) {
       if (l.box.top < p.size.height * 0.09 || l.box.bottom > p.size.height * 0.92) {
-        final k = '${l.box.top < p.size.height / 2 ? 'h' : 'f'}:${_norm(l.text)}';
+        final k = '${l.box.top < p.size.height / 2 ? 'h' : 'f'}:${norm(l.text)}';
         if (seen.add(k)) counts[k] = (counts[k] ?? 0) + 1;
       }
     }
@@ -57,10 +60,15 @@ String _norm(String s) => s.replaceAll(RegExp(r'\d+'), '#').replaceAll(RegExp(r'
   final need = math.max(2, (pages.length * 0.5).ceil());
   var header = '', footer = '';
   for (final p in pages) {
-    for (final l in p.lines) {
+    final candidates = [
+      for (final l in p.lines)
+        if ((counts['${l.box.top < p.size.height / 2 ? 'h' : 'f'}:${norm(l.text)}'] ?? 0) >= need) l
+    ];
+    // Never treat a page's only content as a running header.
+    if (candidates.length >= p.lines.length) continue;
+    for (final l in candidates) {
       final top = l.box.top < p.size.height / 2;
-      final k = '${top ? 'h' : 'f'}:${_norm(l.text)}';
-      if ((counts[k] ?? 0) >= need) {
+      {
         out.add(l);
         // Keep running text without page numbers (numbers differ per page).
         final varies = RegExp(r'\d').hasMatch(l.text) && _norm(l.text) != l.text.toLowerCase();
