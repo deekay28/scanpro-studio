@@ -39,7 +39,7 @@ LayoutPage editableScan(PdfiumSession s, int i) {
   final r = s.renderOriginal(i, scale);
   final (rgba, w, h) = cropRgba(r.rgba, r.width, r.height, Rect.fromLTRB(img.box.left * scale, img.box.top * scale, img.box.right * scale, img.box.bottom * scale));
   final prep = prepareScan(rgba, w, h, img.box);
-  return buildScanLayout(prep, ocrWords(prep.png), size, debug: (n, png) => File('${outDir.path}/debug_$n.png').writeAsBytesSync(png));
+  return buildScanLayout(prep, ocrWords(prep.png), size, debug: (n, png) => png.isEmpty ? print('DBG $n') : File('${outDir.path}/debug_$n.png').writeAsBytesSync(png));
 }
 
 LayoutPage faithful(PdfiumSession s, int i) {
@@ -77,6 +77,8 @@ void main() {
     final page = editableScan(s, 0);
     s.close();
     final docx = writeLayoutDocx([page], title: 'Mess bill');
+    File('${outDir.path}/editable_words.txt').writeAsStringSync([for (final l in page.lines) for (final w in l.words) '${w.box.left.toStringAsFixed(1)}\t${l.baseline.toStringAsFixed(1)}\t${w.size}\t${w.text}'].join('\n'));
+    File('${outDir.path}/editable_lines.txt').writeAsStringSync([for (final l in page.lines) '${l.baseline.toStringAsFixed(1)}\t${l.box.left.toStringAsFixed(1)}\t${l.text}'].join('\n'));
     // ignore: avoid_print
     print([
       'lines: ${page.lines.map((l) => '${l.size}${l.words.any((w) => w.bold) ? 'b' : ''}:${l.text}').join(' | ')}',

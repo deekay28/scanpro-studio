@@ -37,14 +37,37 @@ class LLine {
   }
 
   /// Baseline estimate: bottoms of words without descenders.
+  /// Baseline estimate from the bottoms of words without descenders,
+  /// cross-checked with the tops of the words (cap or x-height above the
+  /// baseline) so a box stretched by an underline or smudge doesn't move it.
   double get baseline {
-    final plain = words.where((w) => !RegExp(r'[gjpqy,;()\[\]{}_|@$]').hasMatch(w.text)).toList();
+    // Words read with very low confidence often have wrong boxes.
+    // Boxes taller than a line of text of this size (ascender to descender
+    // is about 0.93 em) were stretched by something below the text.
+    final plausible = words.where((w) => w.size <= 0 || w.box.height <= w.size * 1.2).toList();
+    if (plausible.isEmpty && size > 0) {
+      final t = words.map((w) => w.box.top).toList()..sort();
+      return t[t.length ~/ 2] + size * 0.72;
+    }
+    final good = plausible.where((w) => (w.confidence ?? 1) >= 0.3).toList();
+    final ws = good.isEmpty ? plausible : good;
+    final plain = ws.where((w) => !RegExp(r'[gjpqy,;()\[\]{}_|@$]').hasMatch(w.text)).toList();
+    double fromBottom;
     if (plain.isNotEmpty) {
       final b = plain.map((w) => w.box.bottom).toList()..sort();
-      return b[b.length ~/ 2];
+      fromBottom = b[(b.length - 1) ~/ 2];
+    } else {
+      final b = ws.map((w) => w.box.bottom - w.size * 0.21).toList()..sort();
+      fromBottom = b[(b.length - 1) ~/ 2];
     }
-    final b = words.map((w) => w.box.bottom - w.size * 0.21).toList()..sort();
-    return b[b.length ~/ 2];
+    final tops = <double>[
+      for (final w in ws)
+        if (w.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').isNotEmpty)
+          w.box.top + w.size * (RegExp(r'[A-Z0-9bdfhklt]').hasMatch(w.text) ? 0.72 : 0.52),
+    ]..sort();
+    if (tops.isEmpty || size <= 0) return fromBottom;
+    final fromTop = tops[tops.length ~/ 2];
+    return (fromBottom - fromTop).abs() > size * 0.25 ? fromTop : fromBottom;
   }
 }
 

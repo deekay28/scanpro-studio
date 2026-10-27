@@ -33,7 +33,7 @@ const pageMargin = 14.0;
 /// from their lines, tables, shaded bands and graphics: text is real Word
 /// text positioned with exact line heights, spacing, indents and tab stops;
 /// tables are Word tables; graphics are anchored at their page positions.
-Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = ''}) {
+Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = '', bool highlightUncertain = true}) {
   final opc = OpcWriter();
   final rels = Rels();
   rels.add('http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', 'styles.xml');
@@ -90,7 +90,7 @@ Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = ''}) {
           '${anchor(bg, behind: true)}</w:p>');
       continue;
     }
-    final w = _PageWriter(page);
+    final w = _PageWriter(page, highlightUncertain);
     final paras = w.build();
     // Graphics are anchored to the first paragraph of the page.
     final anchors = page.graphics.map((g) => anchor(g)).join();
@@ -143,9 +143,10 @@ String _sect(Size s, {required bool last}) {
 class _Para {
   final List<LLine> lines;
   final double size;
-  final double lineHeight; // exact, points
+  double lineHeight; // exact, points
   final String align; // left | center | right
   final double left, right; // indents from the page edges (points)
+  double firstLine = 0; // first line's offset from [left] (multi-line paragraphs)
   final List<(double, String)> tabs; // position from the page's left edge, kind (left/right)
   final List<List<LWord>> segments; // single-line paragraphs with tabs
   _Para(this.lines, this.size, this.lineHeight, this.align, this.left, this.right, this.tabs, this.segments);
@@ -158,7 +159,8 @@ class _Para {
 /// positions follow the source page.
 class _PageWriter {
   final LayoutPage page;
-  _PageWriter(this.page);
+  final bool highlight;
+  _PageWriter(this.page, this.highlight);
 
   double get pw => page.size.width;
 
@@ -176,7 +178,18 @@ class _PageWriter {
         free.add(l);
       }
     }
-    for (final p in _paragraphs(free)) {
+    final paras = _paragraphs(free);
+    // Lines closer together than their natural line height: use the actual
+    // pitch for both, so neither pushes the other down.
+    for (var i = 0; i + 1 < paras.length; i++) {
+      final a = paras[i], b = paras[i + 1];
+      if (a.bottom <= b.top + 0.1) continue;
+      final pitch = b.firstBaseline - a.lines.last.baseline;
+      if (pitch <= 0) continue;
+      if (a.lines.length == 1) a.lineHeight = math.max(a.size * 1.0, math.min(a.lineHeight, pitch));
+      if (b.lines.length == 1) b.lineHeight = math.max(b.size * 1.0, math.min(b.lineHeight, pitch));
+    }
+    for (final p in paras) {
       items.add((p.top, _paraXml(p), p.bottom));
     }
     for (final e in banded.entries) {
@@ -289,29 +302,72 @@ class _PageWriter {
       final half = math.min(c - pageMargin, pw - pageMargin - c);
       return _Para(g, size, lineHeight, 'center', c - half, pw - (c + half), const [], segs);
     }
-    final left = clampD(first.box.left, pageMargin, pw - pageMargin - 10);
+    var left = clampD(first.box.left, pageMargin, pw - pageMargin - 10);
+    var firstLine = 0.0;
+    if (g.length > 1) {
+      // Continuation lines may start elsewhere than the first (hanging or
+      // first-line indents, or a slightly tilted photo).
+      final rest = clampD(median(g.skip(1).map((l) => l.box.left)), pageMargin, pw - pageMargin - 10);
+      firstLine = left - rest;
+      left = rest;
+    }
     final tabs = <(double, String)>[for (var i = 1; i < segs.length; i++) (segs[i].first.box.left, 'left')];
     double right;
-    if (g.length > 1) {
-      // Wrap where the source wrapped: the right edge of the widest line plus a little slack.
-      right = math.max(pageMargin, pw - g.map((l) => l.box.right).reduce(math.max) - size * 1.5);
-    } else {
-      right = pageMargin; // single lines must never wrap
+    right = pageMargin; // lines end where the source's lines end (explicit breaks)
+    return _Para(g, size, lineHeight, 'left', left, right, tabs, segs)..firstLine = firstLine;
+  }
+
+  /// Letter spacing (points) that makes the words as wide as measured in
+  /// the source (letter-spaced titles). Small differences are ignored and
+  /// large ones limited.
+  static double _tracking(List<LWord> words, double size) {
+    var target = 0.0, natural = 0.0, gaps = 0;
+    for (final w in words) {
+      if (w.text.length < 2) continue;
+      target += w.box.width;
+      // Ink is a little narrower than advance widths (side bearings).
+      natural += textAdvance(w.text, bold: w.bold, italic: w.italic, serif: isSerifFont(w.font)) * size - size * 0.07;
+      gaps += w.text.length - 1;
     }
-    return _Para(g, size, lineHeight, 'left', left, right, tabs, segs);
+    if (gaps < 3) return 0;
+    final d = (target - natural) / gaps;
+    if (d.abs() < 0.1) return 0;
+    return clampD(d, -size * 0.06, size * 0.2);
+  }
+
+  /// Spacing for the space run before [b] so that [b] starts where it
+  /// starts in the source: the distance between the two words' left edges
+  /// minus what word [a] (with letter spacing) and a plain space take up.
+  static double _gapExtra(LWord a, LWord b, double size, double track) {
+    final serif = isSerifFont(a.font);
+    final used = textAdvance(a.text, bold: a.bold, italic: a.italic, serif: serif) * size + a.text.length * track + textAdvance(' ', bold: b.bold, serif: serif) * size;
+    return clampD(b.box.left - a.box.left - used, -size * 0.15, size * 1.5);
   }
 
   String _runs(List<LWord> words, double size, {bool tabBefore = false}) {
     final sb = StringBuffer();
+    final track = _tracking(words, size);
     for (var i = 0; i < words.length; i++) {
       final w = words[i];
-      final text = (i == 0 ? '' : ' ') + w.text;
-      sb.write(_run(text, w, size, tab: tabBefore && i == 0, underlineSpace: i > 0 && w.underline && words[i - 1].underline));
+      if (i > 0) {
+        // The space between words is its own run so its width can match.
+        final extra = _gapExtra(words[i - 1], w, size, track);
+        // The space's own font size sets its width (character spacing on a
+        // lone space is not applied by every word processor).
+        final space = textAdvance(' ', bold: w.bold, serif: isSerifFont(w.font));
+        final want = space * size + extra;
+        final spaceSize = extra.abs() < 0.2 ? size : clampD(want / space, 1, size * 4);
+        sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), (spaceSize * 2).round() / 2));
+      }
+      sb.write(_run(w.text, w, size, tab: tabBefore && i == 0, tracking: track));
     }
     return sb.toString();
   }
 
-  String _run(String text, LWord w, double size, {bool tab = false, bool underlineSpace = true}) {
+  static LWord _plain(LWord w) =>
+      LWord(w.text, w.box, size: w.size, bold: w.bold, italic: w.italic, color: w.color, font: w.font, confidence: w.confidence);
+
+  String _run(String text, LWord w, double size, {bool tab = false, double tracking = 0}) {
     final pr = StringBuffer();
     final f = xmlEscape(w.font);
     pr.write('<w:rFonts w:ascii="$f" w:hAnsi="$f" w:cs="$f"/>');
@@ -319,14 +375,11 @@ class _PageWriter {
     if (w.italic) pr.write('<w:i/><w:iCs/>');
     if ((w.color & 0xFFFFFF) != 0) pr.write('<w:color w:val="${_hex(w.color)}"/>');
     final hs = (size * 2).round();
+    if (tracking != 0) pr.write('<w:spacing w:val="${_tw(tracking)}"/>');
     pr.write('<w:sz w:val="$hs"/><w:szCs w:val="$hs"/>');
-    if (w.uncertain) pr.write('<w:highlight w:val="yellow"/>');
+    if (highlight && w.uncertain) pr.write('<w:highlight w:val="yellow"/>');
     final sb = StringBuffer();
     if (tab) sb.write('<w:r><w:rPr>$pr</w:rPr><w:tab/></w:r>');
-    if (text.startsWith(' ') && w.underline && !underlineSpace) {
-      sb.write('<w:r><w:rPr>$pr</w:rPr><w:t xml:space="preserve"> </w:t></w:r>');
-      text = text.substring(1);
-    }
     if (w.underline) pr.write('<w:u w:val="single"/>');
     sb.write('<w:r><w:rPr>$pr</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>');
     return sb.toString();
@@ -337,7 +390,8 @@ class _PageWriter {
         ? ''
         : '<w:tabs>${p.tabs.map((t) => '<w:tab w:val="${t.$2}" w:pos="${_tw(t.$1 - pageMargin)}"/>').join()}</w:tabs>';
     return '<w:pPr>$tabs<w:spacing w:before="0" w:after="0" w:line="${_tw(p.lineHeight)}" w:lineRule="exact"/>'
-        '<w:ind w:left="${_tw(math.max(0, p.left - pageMargin))}" w:right="${_tw(math.max(0, p.right - pageMargin))}"/>'
+        '<w:ind w:left="${_tw(math.max(0, p.left - pageMargin))}" w:right="${_tw(math.max(0, p.right - pageMargin))}"'
+        '${p.firstLine.abs() < 0.3 ? '' : p.firstLine > 0 ? ' w:firstLine="${_tw(p.firstLine)}"' : ' w:hanging="${_tw(-p.firstLine)}"'}/>'
         '${p.align == 'left' ? '' : '<w:jc w:val="${p.align}"/>'}$extra</w:pPr>';
   }
 
@@ -348,8 +402,12 @@ class _PageWriter {
         sb.write(_runs(p.segments[i], p.size, tabBefore: i > 0));
       }
     } else {
-      final words = [for (final l in p.lines) ...l.words];
-      sb.write(_runs(words, p.size));
+      // The source's line breaks are kept (soft breaks), so the text wraps
+      // exactly as in the original and stays editable.
+      for (var i = 0; i < p.lines.length; i++) {
+        if (i > 0) sb.write('<w:r><w:br/></w:r>');
+        sb.write(_runs(p.lines[i].words, p.size));
+      }
     }
     sb.write('</w:p>');
     return sb.toString();
@@ -366,19 +424,25 @@ class _PageWriter {
         '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>'
         '</w:tblPr><w:tblGrid><w:gridCol w:w="${_tw(b.width)}"/></w:tblGrid>'
         '<w:tr><w:trPr><w:trHeight w:val="${_tw(b.height)}" w:hRule="exact"/></w:trPr>'
-        '<w:tc><w:tcPr><w:tcW w:w="${_tw(b.width)}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${_hex(s.color)}"/><w:vAlign w:val="center"/></w:tcPr>');
+        '<w:tc><w:tcPr><w:tcW w:w="${_tw(b.width)}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${_hex(s.color)}"/><w:vAlign w:val="top"/></w:tcPr>');
     if (lines.isEmpty) {
       sb.write('<w:p/>');
     } else {
-      for (final l in lines) {
+      // Lines sit at their measured baselines and left edges inside the band.
+      var cursor = b.top;
+      for (final l in [...lines]..sort((x, y) => x.baseline.compareTo(y.baseline))) {
         final size = halfPoint(l.size);
+        final lh = size * 1.15;
+        final top = l.baseline - lh * baselineRatio;
+        final before = math.max(0.0, top - cursor);
+        cursor = top + lh;
         final c = l.box.center.dx - b.left;
+        final centered = (l.box.center.dx - b.center.dx).abs() < b.width * 0.03;
         final half = math.min(c, b.width - c);
-        final centered = (l.box.center.dx - b.center.dx).abs() < b.width * 0.06;
         final ind = centered
             ? '<w:ind w:left="${_tw(math.max(0, c - half))}" w:right="${_tw(math.max(0, b.width - c - half))}"/><w:jc w:val="center"/>'
-            : '<w:ind w:left="${_tw(math.max(0, l.box.left - b.left))}"/>';
-        sb.write('<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="${_tw(size * 1.15)}" w:lineRule="exact"/>$ind</w:pPr>${_runs(l.words, size)}</w:p>');
+            : '<w:ind w:left="${_tw(math.max(0, l.box.left - b.left))}" w:right="0"/>';
+        sb.write('<w:p><w:pPr><w:spacing w:before="${_tw(before)}" w:after="0" w:line="${_tw(lh)}" w:lineRule="exact"/>$ind</w:pPr>${_runs(l.words, size)}</w:p>');
       }
     }
     sb.write('</w:tc></w:tr></w:tbl>');

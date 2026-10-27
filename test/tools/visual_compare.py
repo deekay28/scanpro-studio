@@ -35,8 +35,14 @@ from PIL import Image, ImageDraw
 DPI = 100
 
 
+# `flutter test` points FONTCONFIG_FILE at its own test fonts; LibreOffice
+# must use the system fonts (Liberation Sans/Serif are metric-compatible with
+# Arial/Times New Roman, as Microsoft Word would use the real fonts).
+ENV = {k: v for k, v in os.environ.items() if k != 'FONTCONFIG_FILE'}
+
+
 def run(cmd, **kw):
-    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    r = subprocess.run(cmd, capture_output=True, text=True, env=ENV, **kw)
     if r.returncode != 0:
         raise RuntimeError(f'{cmd[0]} failed: {r.stderr}')
     return r.stdout

@@ -18,7 +18,9 @@ Uint8List? libreOfficeToPdf(Uint8List bytes, String ext) {
   if (which.exitCode != 0) return null;
   final dir = Directory.systemTemp.createTempSync('lo');
   final f = File('${dir.path}/in.$ext')..writeAsBytesSync(bytes);
-  final r = Process.runSync('soffice', ['--headless', '-env:UserInstallation=file://${dir.path}/profile', '--convert-to', 'pdf', '--outdir', dir.path, f.path]);
+  // `flutter test` sets FONTCONFIG_FILE to its test fonts; use the system's.
+  final r = Process.runSync('soffice', ['--headless', '-env:UserInstallation=file://${dir.path}/profile', '--convert-to', 'pdf', '--outdir', dir.path, f.path],
+      environment: {'FONTCONFIG_FILE': '/etc/fonts/fonts.conf'});
   final out = File('${dir.path}/in.pdf');
   if (r.exitCode != 0 || !out.existsSync()) throw StateError('LibreOffice could not open the file: ${r.stdout}${r.stderr}');
   return out.readAsBytesSync();

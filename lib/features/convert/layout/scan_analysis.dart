@@ -206,6 +206,9 @@ class _ScanAnalyzer {
   late final Rgb im = s.rectified;
   late final int w = im.width, h = im.height;
   late Uint8List norm; // illumination-corrected gray (paper ≈ 248)
+  late Uint8List raw; // gray as photographed
+  late Uint8List outside; // 1 = background around the paper
+  Uint8List? lineMask; // pixels of traced ruling lines
   late Rgb clean; // illumination-corrected colour (for crops)
   late Uint8List ink; // 1 = ink
   late Uint8List colored; // 1 = saturated (coloured) ink
@@ -251,10 +254,21 @@ class _ScanAnalyzer {
     _dump('ink', ink);
     _dump('colored', colored);
     debug?.call('rectified', s.png);
-    final rules = _rules();
-    final words = [
+    // Ruling lines are searched in the ink outside recognised words, so the
+    // strokes of letters are never taken for table borders.
+    final lineInk = Uint8List(w * h);
+    for (var i = 0; i < w * h; i++) {
+      if (norm[i] < 185 || ink[i] == 1) lineInk[i] = 1;
+    }
+    for (final o in ocr) {
+      final t = o.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+      if (t.isEmpty || (o.confidence ?? 0.8) < 0.3) continue;
+      _clear(lineInk, o.box.deflate(1));
+    }
+    final rules = _rules(lineInk);
+    final words = <PdfWord>[
       for (final o in ocr)
-        if (o.text.trim().isNotEmpty) o,
+        if (_cleanWord(o) case final c?) _trimToInk(o, c),
     ];
     // Shaded bands first, so they are not taken for graphics.
     final preRows = _rows(_styleWords(words, rules));
@@ -262,16 +276,46 @@ class _ScanAnalyzer {
     final graphics = _graphics(rules, words, shadeBoxes.map((x) => x.$1).toList());
     final graphicRects = graphics.map((g) => g.$1).toList();
     // Text that belongs to a graphic (stamp text, handwriting read as text).
+    // Text inside a graphic is part of it (stamp text, handwriting read as
+    // text) unless it is clearly printed text, which is never dropped.
     final textWords = words.where((wd) {
       final c = wd.box.center;
       for (final r in graphicRects) {
-        if (r.contains(c)) return false;
+        if (r.contains(c) && !_looksLikeText(wd)) return false;
       }
       return true;
     }).toList();
     final styled = _styleWords(textWords, rules);
     final rows = _rows(styled);
-    final tables = _tables(rules, rows);
+    _markUnderlines(rows, rules);
+    final tableRules = rules.where((r) {
+      final rr = r.horizontal ? Rect.fromLTRB(r.a, r.pos - 1, r.b, r.pos + 1) : Rect.fromLTRB(r.pos - 1, r.a, r.pos + 1, r.b);
+      return !graphicRects.any((g) => g.inflate(4).contains(rr.topLeft) && g.inflate(4).contains(rr.bottomRight));
+    }).toList();
+    final tables = _tables(tableRules, rows);
+    if (debug != null) {
+      final o = img.Image.fromBytes(width: w, height: h, bytes: im.data.buffer, numChannels: 3).clone();
+      void box(Rect r, img.Color c) => img.drawRect(o, x1: r.left.round(), y1: r.top.round(), x2: r.right.round(), y2: r.bottom.round(), color: c, thickness: 3);
+      for (final wd in words) {
+        box(wd.box, img.ColorRgb8(150, 150, 150));
+      }
+      for (final r in rules) {
+        final c = img.ColorRgb8(255, 0, 0);
+        if (r.horizontal) {
+          img.drawLine(o, x1: r.a.round(), y1: r.pos.round(), x2: r.b.round(), y2: r.pos.round(), color: c, thickness: 3);
+        } else {
+          img.drawLine(o, x1: r.pos.round(), y1: r.a.round(), x2: r.pos.round(), y2: r.b.round(), color: c, thickness: 3);
+        }
+      }
+      for (final g in graphics) {
+        box(g.$1, img.ColorRgb8(0, 0, 255));
+      }
+      for (final sb in shadeBoxes) {
+        box(sb.$1, img.ColorRgb8(0, 180, 0));
+      }
+      debug!('overlay', Uint8List.fromList(img.encodePng(o.convert(numChannels: 3), level: 1)));
+      _dump('faint', faint);
+    }
     final inTables = <_Row>{for (final t in tables) ...t.$2};
     final shades = shadeBoxes.where((sb) => !tables.any((t) => mapRect(sb.$1).overlaps(t.$1.box))).toList();
     // Map everything to page points.
@@ -302,6 +346,7 @@ class _ScanAnalyzer {
 
   void _masks() {
     final g = toGray(im);
+    raw = g;
     final bg = estimateBackground(g, w, h, minRatio: 0.5);
     norm = Uint8List(w * h);
     clean = im.clone();
@@ -327,11 +372,16 @@ class _ScanAnalyzer {
         cd[j + 2] = b;
       }
       if (n < 150) ink[i] = 1;
-      if (sat > 45 && n < 225) {
+      if (sat > 20 && n < 225) {
         colored[i] = 1;
         ink[i] = 1;
       }
-      if (n < 212) faint[i] = 1;
+    }
+    // Faint marks (stamps, seals, light pencil): clearly darker than their
+    // surroundings, so smooth shadows and folds in photos don't count.
+    final local = boxBlurU8(norm, w, h, math.max(4, (w * 0.008).round()));
+    for (var i = 0; i < w * h; i++) {
+      if (norm[i] < 165 || (norm[i] < 215 && norm[i] < local[i] - 16)) faint[i] = 1;
     }
     // Background around the paper (dark, touching the image border) is not
     // content.
@@ -362,7 +412,7 @@ class _ScanAnalyzer {
     }
     // Grow the background a little (its soft edge).
     final grow = (w * 0.006).ceil();
-    final outside = Uint8List.fromList(out);
+    outside = Uint8List.fromList(out);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         if (out[y * w + x] == 0) continue;
@@ -374,6 +424,7 @@ class _ScanAnalyzer {
     }
     for (var i = 0; i < w * h; i++) {
       if (outside[i] == 1) {
+        norm[i] = 255;
         ink[i] = 0;
         colored[i] = 0;
         faint[i] = 0;
@@ -387,55 +438,127 @@ class _ScanAnalyzer {
 
   // ---- ruling lines -------------------------------------------------------
 
-  List<_Rule> _rules() {
-    final minLen = math.max(24, (w * 0.035).round());
+  /// Horizontal and vertical lines in [m]. Lines are traced from seed runs,
+  /// following the ink with a drift of up to two pixels per step and gaps of
+  /// a few pixels, so borders of curled or slightly tilted paper are found
+  /// as single lines. Collinear pieces are joined afterwards.
+  List<_Rule> _rules(Uint8List m) {
     final out = <_Rule>[];
     for (final horizontal in [true, false]) {
+      final minLen = horizontal ? math.max(24, (w * 0.035).round()) : math.max(14, (h * 0.012).round());
       final major = horizontal ? h : w, minor = horizontal ? w : h;
-      final segs = <(int, int, int)>[]; // line index, start, end
+      bool at(int line, int x) => line >= 0 && line < major && x >= 0 && x < minor && m[horizontal ? line * w + x : x * w + line] == 1;
+      // Seeds: runs of at least half the minimum length.
+      final seeds = <(int, int, int)>[];
+      final seedLen = math.max(10, minLen ~/ 2);
       for (var y = 0; y < major; y++) {
-        var start = -1, gap = 0;
+        var start = -1;
         for (var x = 0; x <= minor; x++) {
-          final on = x < minor && ink[horizontal ? y * w + x : x * w + y] == 1;
-          if (on) {
+          if (x < minor && at(y, x)) {
             if (start < 0) start = x;
-            gap = 0;
           } else if (start >= 0) {
-            gap++;
-            if (gap > 2 || x == minor) {
-              final end = x - gap;
-              if (end - start >= minLen) segs.add((y, start, end));
-              start = -1;
+            if (x - start >= seedLen) seeds.add((y, start, x));
+            start = -1;
+          }
+        }
+      }
+      seeds.sort((p, q) => (q.$3 - q.$2).compareTo(p.$3 - p.$2));
+      final visited = Uint8List(w * h);
+      void visit(int line, int x) {
+        for (var d = -3; d <= 3; d++) {
+          final l = line + d;
+          if (l < 0 || l >= major) continue;
+          visited[horizontal ? l * w + x : x * w + l] = 1;
+        }
+      }
+
+      bool seen(int line, int x) => visited[horizontal ? line * w + x : x * w + line] == 1;
+      lineMask ??= Uint8List(w * h);
+      final rules = <_Rule>[];
+      for (final (y0, s0, e0) in seeds) {
+        final mid = (s0 + e0) ~/ 2;
+        if (seen(y0, mid)) continue;
+        // Thickness at the seed.
+        var t0 = y0, t1 = y0;
+        while (at(t0 - 1, mid) && y0 - t0 < 12) {
+          t0--;
+        }
+        while (at(t1 + 1, mid) && t1 - y0 < 12) {
+          t1++;
+        }
+        final thick = t1 - t0 + 1;
+        if (thick > math.max(8, w * 0.008)) continue;
+        final center = (t0 + t1) / 2;
+        var sumPos = 0.0, n = 0;
+        int trace(int dir) {
+          var y = center.round(), x = dir > 0 ? e0 : s0 - 1, gap = 0, last = dir > 0 ? e0 - 1 : s0;
+          while (x >= 0 && x < minor) {
+            int? best;
+            for (final d in const [0, -1, 1, -2, 2]) {
+              if (at(y + d, x)) {
+                best = y + d;
+                break;
+              }
+            }
+            if (best != null) {
+              y = best;
               gap = 0;
+              last = x;
+              sumPos += y;
+              n++;
+              visit(y, x);
+            } else if (++gap > 6) {
+              break;
+            }
+            x += dir;
+          }
+          return last;
+        }
+
+        for (var x = s0; x < e0; x++) {
+          visit(y0, x);
+          sumPos += center;
+          n++;
+        }
+        final b = trace(1), a = trace(-1);
+        if (b - a + 1 < minLen) continue;
+        // Remember the traced pixels (the line is not perfectly straight).
+        for (var x = a; x <= b; x++) {
+          for (var l = math.max(0, center.round() - 14); l <= math.min(major - 1, center.round() + 14); l++) {
+            final i = horizontal ? l * w + x : x * w + l;
+            if (visited[i] == 1) lineMask![i] = 1;
+          }
+        }
+        rules.add(_Rule(horizontal, sumPos / n, a.toDouble(), b + 1.0, thick.toDouble()));
+      }
+      // Join collinear pieces (lines broken by gaps wider than the tracer's).
+      final posTol = w * 0.012, gapTol = w * 0.03;
+      var list = rules;
+      var changed = true;
+      while (changed) {
+        changed = false;
+        list.sort((x, y) => x.pos.compareTo(y.pos));
+        outer:
+        for (var i = 0; i < list.length; i++) {
+          for (var j = i + 1; j < list.length && list[j].pos - list[i].pos <= posTol; j++) {
+            final a = list[i], b = list[j];
+            final gap = math.max(a.a, b.a) - math.min(a.b, b.b);
+            final sequential = -gap < math.min(a.length, b.length) * 0.15;
+            if (gap <= gapTol && sequential) {
+              final la = a.length, lb = b.length;
+              a
+                ..pos = (a.pos * la + b.pos * lb) / math.max(1, la + lb)
+                ..a = math.min(a.a, b.a)
+                ..b = math.max(a.b, b.b)
+                ..thickness = math.max(a.thickness, b.thickness);
+              list.removeAt(j);
+              changed = true;
+              break outer;
             }
           }
         }
       }
-      // Merge segments on adjacent lines into rules (allowing a slight tilt).
-      final rules = <_Rule>[];
-      for (final (y, a, b) in segs) {
-        _Rule? hit;
-        for (final r in rules.reversed) {
-          if (y - (r.pos + r.thickness / 2) > 3) break;
-          if (math.min(b, r.b) - math.max(a, r.a) > math.min(b - a, r.length) * 0.5) {
-            hit = r;
-            break;
-          }
-        }
-        if (hit == null) {
-          rules.add(_Rule(horizontal, y.toDouble(), a.toDouble(), b.toDouble(), 1));
-        } else {
-          final top = hit.pos - hit.thickness / 2 + 0.5;
-          final nt = y - top + 1;
-          hit
-            ..thickness = nt
-            ..pos = top + nt / 2 - 0.5
-            ..a = math.min(hit.a, a.toDouble())
-            ..b = math.max(hit.b, b.toDouble());
-        }
-      }
-      // Thick blobs are filled shapes or bold text, not rules.
-      out.addAll(rules.where((r) => r.thickness <= math.max(6, w * 0.006) && r.length >= minLen));
+      out.addAll(list);
     }
     return out;
   }
@@ -450,12 +573,14 @@ class _ScanAnalyzer {
       _clear(mask, sh.inflate(2));
     }
     for (final wd in words) {
-      if ((wd.confidence ?? 0.8) < 0.55 || _coloredShare(wd.box) > 0.4) continue;
+      if (!_looksLikeText(wd)) continue;
       _clear(mask, wd.box.inflate(2));
     }
-    for (final r in rules) {
-      final t = r.thickness / 2 + 2;
-      _clear(mask, r.horizontal ? Rect.fromLTRB(r.a - 2, r.pos - t, r.b + 2, r.pos + t) : Rect.fromLTRB(r.pos - t, r.a - 2, r.pos + t, r.b + 2));
+    final lm = lineMask;
+    if (lm != null) {
+      for (var i = 0; i < w * h; i++) {
+        if (lm[i] == 1) mask[i] = 0;
+      }
     }
     // Components on a coarse grid (merges strokes of one graphic).
     final cell = math.max(3, (w / 160).round());
@@ -522,12 +647,20 @@ class _ScanAnalyzer {
       final minSide = w * 0.045;
       if (r.width < minSide || r.height < minSide) continue;
       if (r.width > w * 0.9 && r.height > h * 0.9) continue;
-      final density = _inkIn(r, ink) / (r.width * r.height);
+      final density = _inkIn(r, mask) / (r.width * r.height);
       final colouredShare = c.ink == 0 ? 0.0 : c.colored / c.ink;
       // Edges of the paper and fold shadows: long thin strips at the border.
       final atEdge = r.left < w * 0.02 || r.top < h * 0.01 || r.right > w * 0.98 || r.bottom > h * 0.99;
       if (atEdge && (r.width < w * 0.06 || r.height < h * 0.04) && colouredShare < 0.3) continue;
       final aspect = r.width / r.height;
+      var covered = 0.0;
+      for (final wd in words) {
+        final i = wd.box.intersect(r);
+        if (i.width > 0 && i.height > 0) covered += i.width * i.height;
+      }
+      final textual = covered > r.width * r.height * 0.45;
+      if (debug != null && r.width > w * 0.03 && r.height > w * 0.03) debug!('comp ${r.left.round()},${r.top.round()} ${r.width.round()}x${r.height.round()} dens=${density.toStringAsFixed(3)} col=${colouredShare.toStringAsFixed(2)} textual=$textual', Uint8List(0));
+      if (textual && !(density > 0.3 && aspect > 0.8 && aspect < 1.25)) continue;
       GraphicKind kind;
       if (density > 0.3 && aspect > 0.8 && aspect < 1.25 && colouredShare < 0.2) {
         kind = GraphicKind.qrCode;
@@ -556,6 +689,82 @@ class _ScanAnalyzer {
       }
     }
     return out;
+  }
+
+  /// Removes typical OCR artefacts of borders and noise: unmatched
+  /// brackets or bars at a word's ends (table and box edges read as
+  /// characters) and tokens without letters or digits read with low
+  /// confidence. Returns null when nothing real is left.
+  static PdfWord? _cleanWord(PdfWord o) {
+    var t = o.text.trim();
+    if (t.isEmpty) return null;
+    final conf = o.confidence ?? 0.8;
+    var box = o.box;
+    final per = box.width / math.max(1, t.length);
+    while (t.length > 1 && (t.startsWith('|') || (t.startsWith('[') && !t.contains(']')))) {
+      t = t.substring(1);
+      box = Rect.fromLTRB(box.left + per, box.top, box.right, box.bottom);
+    }
+    while (t.length > 1 && (t.endsWith('|') || (t.endsWith(']') && !t.contains('[')))) {
+      t = t.substring(0, t.length - 1);
+      box = Rect.fromLTRB(box.left, box.top, box.right - per, box.bottom);
+    }
+    final alnum = t.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F₹$€£%]'), '').length;
+    if (t == '|' || (alnum == 0 && conf < 0.75 && t != ':' && t != '-')) return null;
+    if (alnum <= 2 && conf < 0.35) return null;
+    return PdfWord(t, box, confidence: o.confidence);
+  }
+
+  /// After stray border characters were removed from a word, its box is
+  /// trimmed to the ink that remains: the first (or last) group of ink
+  /// columns is dropped when it is separated from the rest by a gap.
+  PdfWord _trimToInk(PdfWord orig, PdfWord cleaned) {
+    if (cleaned.text == orig.text.trim()) return cleaned;
+    final b = orig.box;
+    final x0 = math.max(0, b.left.floor()), x1 = math.min(w, b.right.ceil());
+    final y0 = math.max(0, b.top.floor()), y1 = math.min(h, b.bottom.ceil());
+    final lm = lineMask;
+    final cols = <bool>[
+      for (var x = x0; x < x1; x++)
+        () {
+          for (var y = y0; y < y1; y++) {
+            final i = y * w + x;
+            if (ink[i] == 1 && (lm == null || lm[i] == 0)) return true;
+          }
+          return false;
+        }(),
+    ];
+    // Ink runs (letters) along the box.
+    final runs = <(int, int)>[];
+    var start = -1;
+    for (var i = 0; i <= cols.length; i++) {
+      final on = i < cols.length && cols[i];
+      if (on && start < 0) start = i;
+      if (!on && start >= 0) {
+        runs.add((start, i));
+        start = -1;
+      }
+    }
+    if (runs.isEmpty) return cleaned;
+    final gaps = [for (var i = 1; i < runs.length; i++) runs[i].$1 - runs[i - 1].$2]..sort();
+    final typical = gaps.isEmpty ? 0 : gaps[gaps.length ~/ 2];
+    bool bar((int, int) r) => r.$2 - r.$1 <= math.max(3, b.height * 0.12);
+    final o = orig.text.trim();
+    var first = 0, last = runs.length - 1;
+    if ((o.startsWith('[') || o.startsWith('|')) && runs.length > 1 && bar(runs[0]) && runs[1].$1 - runs[0].$2 > typical * 1.5) first = 1;
+    if ((o.endsWith(']') || o.endsWith('|')) && runs.length > 1 && bar(runs[last]) && runs[last].$1 - runs[last - 1].$2 > typical * 1.5) last--;
+    final left = x0 + runs[first].$1.toDouble(), right = x0 + runs[last].$2.toDouble();
+    if (right - left < b.width * 0.2) return cleaned;
+    return PdfWord(cleaned.text, Rect.fromLTRB(left, b.top, right, b.bottom), confidence: cleaned.confidence);
+  }
+
+  /// A recognised word that is real printed text (not OCR noise on a
+  /// stamp, signature or QR code).
+  bool _looksLikeText(PdfWord wd) {
+    final conf = wd.confidence ?? 0.8;
+    final alnum = wd.text.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F]'), '').length;
+    if (_coloredShare(wd.box) > 0.4) return false;
+    return (conf >= 0.3 && alnum >= 2) || conf >= 0.8;
   }
 
   Rect _tighten(Rect r, Uint8List mask) {
@@ -628,73 +837,169 @@ class _ScanAnalyzer {
   List<LWordPx> _styleWords(List<PdfWord> words, List<_Rule> rules) {
     final strokes = <double>[];
     final out = <LWordPx>[];
+    // Stroke width relative to the font size (fitted from the word's width,
+    // which unlike its height doesn't depend on capitals or descenders).
+    double rel(LWordPx x) => x.stroke / math.max(1, _sizePx(x.word));
     for (final wd in words) {
-      final sw = _strokeWidth(wd.box);
-      out.add(LWordPx(wd, sw));
-      if (sw > 0) strokes.add(sw / math.max(1, wd.box.height));
+      final x = LWordPx(wd, _strokeWidth(wd.box));
+      out.add(x);
+      if (x.stroke > 0 && wd.text.length >= 2) strokes.add(rel(x));
     }
     final base = median(strokes);
+    if (debug != null) {
+      debug!('bold base=${base.toStringAsFixed(3)} ${out.map((x) => '${x.word.text}=${(rel(x) / base).toStringAsFixed(2)}').join(' ')}', Uint8List(0));
+    }
     for (final x in out) {
-      final rel = x.stroke / math.max(1, x.word.box.height);
-      x.bold = base > 0 && rel > base * 1.28;
-      final b = x.word.box;
-      for (final r in rules.where((r) => r.horizontal)) {
-        final dy = r.pos - b.bottom;
-        if (dy > -b.height * 0.15 && dy < b.height * 0.45) {
-          final ov = math.min(r.b, b.right) - math.max(r.a, b.left);
-          if (ov > b.width * 0.6 && r.length < w * 0.75) x.underline = true;
-        }
-      }
+      x.bold = base > 0 && rel(x) > base * 1.22;
     }
     return out;
   }
 
-  /// Median horizontal run length of ink inside a word box.
-  double _strokeWidth(Rect r) {
-    final runs = <int>[];
-    final x0 = math.max(0, r.left.floor()), x1 = math.min(w, r.right.ceil());
-    final y0 = math.max(0, (r.top + r.height * 0.2).floor()), y1 = math.min(h, (r.bottom - r.height * 0.2).ceil());
-    for (var y = y0; y < y1; y++) {
-      var run = 0;
-      for (var x = x0; x < x1; x++) {
-        if (norm[y * w + x] < 150) {
-          run++;
-        } else if (run > 0) {
-          runs.add(run);
-          run = 0;
+  /// Underlines, found in the ink: a nearly continuous ink row at the
+  /// bottom of a word or just below it. The full run must stay within its
+  /// text row (a table border running past the text is not an underline).
+  void _markUnderlines(List<_Row> rows, List<_Rule> rules) {
+    for (final row in rows) {
+      final hs = row.words.map((x) => x.word.box.height).toList()..sort();
+      final lh = hs[hs.length ~/ 2];
+      final rb = row.box;
+      final reach = math.max(w * 0.03, lh * 1.5);
+      for (final x in row.words) {
+        final b = x.word.box;
+        if (b.width < 4) continue;
+        final y0 = (b.top + b.height * 0.55).round(), y1 = math.min(h - 1, (b.bottom + lh * 0.6).round());
+        for (var y = math.max(0, y0); y <= y1; y++) {
+          // Longest ink run on this row that overlaps the word.
+          bool on(int xx) {
+            for (var d = -1; d <= 1; d++) {
+              final yy = y + d;
+              if (yy >= 0 && yy < h && ink[yy * w + xx] == 1) return true;
+            }
+            return false;
+          }
+
+          var bestLen = 0, bestA = 0, bestB = 0;
+          var xx = math.max(0, b.left.round());
+          while (xx < math.min(w, b.right.round())) {
+            if (!on(xx)) {
+              xx++;
+              continue;
+            }
+            var a = xx, e = xx;
+            // Extend in both directions (a run may continue past the word).
+            while (a > 0 && (on(a - 1) || (a > 2 && on(a - 2) && on(a - 3)))) {
+              a--;
+            }
+            while (e < w - 1) {
+              if (on(e + 1)) {
+                e++;
+              } else if (e + 2 < w && on(e + 2)) {
+                e += 2;
+              } else {
+                break;
+              }
+            }
+            final int covered = math.min(e, b.right.round()) - math.max(a, b.left.round());
+            if (covered > bestLen) {
+              bestLen = covered;
+              bestA = a;
+              bestB = e;
+            }
+            xx = e + 1;
+          }
+          // A traced ruling line at this height that runs past the text (a
+          // table or box border) is not an underline.
+          final border = rules.any((r) => r.horizontal && (r.pos - y).abs() <= 4 && r.a <= b.right && r.b >= b.left && (r.a < rb.left - reach || r.b > rb.right + reach));
+          if (!border && bestLen >= b.width * 0.85 && bestA >= rb.left - reach && bestB <= rb.right + reach) {
+            x.underline = true;
+            break;
+          }
         }
       }
-      if (run > 0) runs.add(run);
     }
-    if (runs.isEmpty) return 0;
-    runs.sort();
-    return runs[runs.length ~/ 2].toDouble();
+  }
+
+  /// Font size of a word in pixels, from its width (checked against height).
+  static double _sizePx(PdfWord wd) {
+    final adv = textAdvance(wd.text) - 0.07;
+    final byWidth = adv <= 0 ? 0.0 : wd.box.width / adv;
+    final byHeight = wd.box.height / 0.8;
+    return byWidth <= 0 ? byHeight : clampD(byWidth, byHeight * 0.6, byHeight * 1.6);
+  }
+
+  /// Within a run of words (a segment), a clear majority decides bold, so
+  /// noisy stroke estimates don't make lines partly bold; genuinely mixed
+  /// runs keep their per-word weights.
+  static void _smoothBold(List<LWordPx> words) {
+    if (words.length < 2) return;
+    var bold = 0, all = 0;
+    for (final x in words) {
+      final n = x.word.text.length;
+      all += n;
+      if (x.bold) bold += n;
+    }
+    final f = bold / math.max(1, all);
+    if (f >= 0.65) {
+      for (final x in words) {
+        x.bold = true;
+      }
+    } else if (f <= 0.35) {
+      for (final x in words) {
+        x.bold = false;
+      }
+    }
+  }
+
+  /// Average stroke width inside a word box, to a fraction of a pixel:
+  /// the ink "mass" of each row (from gray levels, so anti-aliased edges
+  /// count partly) divided by the number of strokes crossing it.
+  double _strokeWidth(Rect r) {
+    final x0 = math.max(0, r.left.floor()), x1 = math.min(w, r.right.ceil());
+    final y0 = math.max(0, (r.top + r.height * 0.25).floor()), y1 = math.min(h, (r.bottom - r.height * 0.25).ceil());
+    var mass = 0.0, runs = 0;
+    for (var y = y0; y < y1; y++) {
+      var inRun = false;
+      for (var x = x0; x < x1; x++) {
+        final n = norm[y * w + x];
+        if (n < 225) mass += math.min(1.0, (225 - n) / 145);
+        final on = n < 150;
+        if (on && !inRun) runs++;
+        inRun = on;
+      }
+    }
+    return runs == 0 ? 0 : mass / runs;
   }
 
   // ---- rows ---------------------------------------------------------------
 
+  /// Groups words into text rows. Words are chained left to right: a word
+  /// joins the row whose last word overlaps it vertically, so lines that
+  /// tilt or curve in a photo stay single rows and never swallow the line
+  /// above or below.
   List<_Row> _rows(List<LWordPx> words) {
-    final sorted = [...words]..sort((a, b) => a.word.box.center.dy.compareTo(b.word.box.center.dy));
+    final sorted = [...words]..sort((a, b) => a.word.box.left.compareTo(b.word.box.left));
     final rows = <_Row>[];
     for (final wd in sorted) {
-      _Row? hit;
-      for (final r in rows.reversed.take(3)) {
-        final rb = r.box;
-        final ov = math.min(rb.bottom, wd.word.box.bottom) - math.max(rb.top, wd.word.box.top);
-        if (ov > math.min(rb.height, wd.word.box.height) * 0.45) {
-          hit = r;
-          break;
+      final b = wd.word.box;
+      _Row? best;
+      var bestScore = 0.0;
+      for (final r in rows) {
+        final last = r.words.last.word.box;
+        if (b.left < last.left) continue;
+        final ov = math.min(last.bottom, b.bottom) - math.max(last.top, b.top);
+        final score = ov / math.min(last.height, b.height);
+        if (score > 0.5 && score > bestScore) {
+          best = r;
+          bestScore = score;
         }
       }
-      if (hit == null) {
+      if (best == null) {
         rows.add(_Row([wd]));
       } else {
-        hit.words.add(wd);
+        best.words.add(wd);
       }
     }
-    for (final r in rows) {
-      r.words.sort((a, b) => a.word.box.left.compareTo(b.word.box.left));
-    }
+    rows.sort((a, b) => a.box.center.dy.compareTo(b.box.center.dy));
     return rows;
   }
 
@@ -704,6 +1009,10 @@ class _ScanAnalyzer {
     final hs = rules.where((r) => r.horizontal && r.length > w * 0.12).toList();
     final vs = rules.where((r) => !r.horizontal && r.length > h * 0.015).toList();
     final tol = w * 0.012;
+    if (debug != null) {
+      debug!('H ${hs.map((r) => '${r.pos.round()}:${r.a.round()}-${r.b.round()}').join(' ')}', Uint8List(0));
+      debug!('V ${vs.where((r) => r.pos > w * 0.02 && r.length > h * 0.02).map((r) => '${r.pos.round()}:${r.a.round()}-${r.b.round()}').join(' ')}', Uint8List(0));
+    }
     bool touch(_Rule a, _Rule b) {
       final hr = a.horizontal ? a : b, vr = a.horizontal ? b : a;
       return vr.pos >= hr.a - tol && vr.pos <= hr.b + tol && hr.pos >= vr.a - tol && hr.pos <= vr.b + tol;
@@ -735,9 +1044,33 @@ class _ScanAnalyzer {
       final gv = [for (var i = 0; i < all.length; i++) if (group[i] == gi && !all[i].horizontal) all[i]];
       if (gh.length < 2 || gv.length < 2) continue;
       final ys = _cluster(gh.map((r) => r.pos).toList(), h * 0.012);
-      final xs = _cluster(gv.map((r) => r.pos).toList(), w * 0.022);
+      var xs = _cluster(gv.map((r) => r.pos).toList(), w * 0.022);
+      // A real column border never runs through a word or a normal gap
+      // between words of one phrase ("Amount | Payable").
+      if (ys.length >= 2 && xs.length > 2) {
+        final top = ys.first, bottom = ys.last;
+        bool cuts(double x) {
+          for (final row in rows) {
+            final rb = row.box;
+            if (rb.center.dy < top || rb.center.dy > bottom) continue;
+            final wh = median(row.words.map((x) => x.word.box.height));
+            for (var i = 0; i < row.words.length; i++) {
+              final b = row.words[i].word.box;
+              if (x > b.left + b.width * 0.2 && x < b.right - b.width * 0.2) return true;
+              if (i + 1 < row.words.length) {
+                final n = row.words[i + 1].word.box;
+                if (x > b.right && x < n.left && n.left - b.right < wh * 0.9) return true;
+              }
+            }
+          }
+          return false;
+        }
+
+        xs = [xs.first, for (var i = 1; i < xs.length - 1; i++) if (!cuts(xs[i])) xs[i], xs.last];
+      }
       if (ys.length < 2 || xs.length < 2) continue;
       final box = Rect.fromLTRB(xs.first, ys.first, xs.last, ys.last);
+      if (debug != null) debug!('table xs=$xs ys=$ys', Uint8List(0));
       if (box.width < w * 0.2 || box.height < h * 0.02) continue;
       final nr = ys.length - 1, nc = xs.length - 1;
       bool vBorder(int r, int c) => gv.any((v) => (v.pos - xs[c]).abs() < w * 0.022 && v.a <= ys[r] + (ys[r + 1] - ys[r]) * 0.35 && v.b >= ys[r + 1] - (ys[r + 1] - ys[r]) * 0.35);
@@ -795,14 +1128,33 @@ class _ScanAnalyzer {
           e.key.lines.add(_toLine(r.words));
         }
       }
+      final tablePaper = _paperLevel(box.inflate(h * 0.03));
       for (final cell in cells) {
         final rect = Rect.fromLTRB(xs[cell.col], ys[cell.row], xs[cell.col + cell.colSpan], ys[cell.row + cell.rowSpan]);
-        cell.shade = _fill(rect.deflate(math.max(3, w * 0.004)));
+        cell.shade = _stepShaded(rect) ? _fill(rect.deflate(math.max(3, w * 0.004)), tablePaper, 14) : null;
       }
       final thickness = median([...gh, ...gv].map((r) => r.thickness)) * scaleAt(box);
       out.add((LTable(colX, rowY, cells, borderWidth: clampD(thickness, 0.5, 3)), used));
     }
     return out;
+  }
+
+  /// Whether a cell is filled: clearly darker than the area just across at
+  /// least two of its borders. A lighting gradient in a photo changes
+  /// smoothly and has no such step.
+  bool _stepShaded(Rect cell) {
+    final s = math.max(6.0, w * 0.015), m = math.max(4.0, w * 0.005);
+    var steps = 0;
+    for (final (inside, out) in [
+      (Rect.fromLTRB(cell.left + m, cell.top + m, cell.left + m + s, cell.bottom - m), Rect.fromLTRB(cell.left - m - s, cell.top + m, cell.left - m, cell.bottom - m)),
+      (Rect.fromLTRB(cell.right - m - s, cell.top + m, cell.right - m, cell.bottom - m), Rect.fromLTRB(cell.right + m, cell.top + m, cell.right + m + s, cell.bottom - m)),
+      (Rect.fromLTRB(cell.left + m, cell.top + m, cell.right - m, cell.top + m + s), Rect.fromLTRB(cell.left + m, cell.top - m - s, cell.right - m, cell.top - m)),
+      (Rect.fromLTRB(cell.left + m, cell.bottom - m - s, cell.right - m, cell.bottom - m), Rect.fromLTRB(cell.left + m, cell.bottom + m, cell.right - m, cell.bottom + m + s)),
+    ]) {
+      final a = _behind(inside), b = _behind(out);
+      if (a < 255 && b < 255 && b - a >= 14) steps++;
+    }
+    return steps >= 2;
   }
 
   static List<double> _cluster(List<double> v, double tol) {
@@ -818,9 +1170,12 @@ class _ScanAnalyzer {
     return [for (final g in groups) g.reduce((a, b) => a + b) / g.length];
   }
 
-  /// A fill colour when the non-ink area of [r] is clearly darker than paper.
-  int? _fill(Rect r) {
+  /// A fill colour when the non-ink area of [r] is clearly darker than the
+  /// paper level [paper] (raw gray). The colour is scaled so that paper
+  /// would be white.
+  int? _fill(Rect r, [double? paper, double minDelta = 14]) {
     if (r.width < 2 || r.height < 2) return null;
+    final ref = paper ?? _globalPaper;
     var n = 0, sr = 0, sg = 0, sb = 0, sum = 0;
     final x0 = math.max(0, r.left.floor()), x1 = math.min(w, r.right.ceil());
     final y0 = math.max(0, r.top.floor()), y1 = math.min(h, r.bottom.ceil());
@@ -828,9 +1183,9 @@ class _ScanAnalyzer {
     for (var y = y0; y < y1; y += 2) {
       for (var x = x0; x < x1; x += 2) {
         final i = y * w + x;
-        if (ink[i] == 1) continue;
+        if (ink[i] == 1 || outside[i] == 1) continue;
         n++;
-        sum += norm[i];
+        sum += raw[i];
         sr += d[i * 3];
         sg += d[i * 3 + 1];
         sb += d[i * 3 + 2];
@@ -838,73 +1193,99 @@ class _ScanAnalyzer {
     }
     if (n < 20) return null;
     final mean = sum / n;
-    if (mean > 226) return null;
-    // Colour of the band relative to paper (corrected for illumination).
-    final k = mean / math.max(1, (sr + sg + sb) / (3 * n));
+    if (mean > ref - minDelta) return null;
+    final k = 255 / math.max(1, ref);
     int c(int v) => clamp255(v / n * k);
     return 0xFF000000 | (c(sr) << 16) | (c(sg) << 8) | c(sb);
   }
 
+  late final double _globalPaper = _paperLevel(Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
+
   // ---- shaded bands -------------------------------------------------------
 
   /// Grey or coloured bars behind a text line (e.g. a section heading).
+  /// Median raw gray of non-ink paper pixels in [r] (255 when none).
+  double _paperLevel(Rect r) {
+    final vals = <int>[];
+    final x0 = math.max(0, r.left.floor()), x1 = math.min(w, r.right.ceil());
+    final y0 = math.max(0, r.top.floor()), y1 = math.min(h, r.bottom.ceil());
+    final step = math.max(1, ((x1 - x0) * (y1 - y0) / 4000).floor());
+    var k = 0;
+    for (var y = y0; y < y1; y++) {
+      for (var x = x0; x < x1; x++) {
+        if (k++ % step != 0) continue;
+        final i = y * w + x;
+        if (ink[i] == 0 && outside[i] == 0 && faint[i] == 0) vals.add(raw[i]);
+      }
+    }
+    if (vals.length < 8) return 255;
+    vals.sort();
+    return vals[vals.length ~/ 2].toDouble();
+  }
+
+  /// Raw gray of the background behind [r], ignoring ink (255 when none).
+  double _behind(Rect r) {
+    final vals = <int>[];
+    final x0 = math.max(0, r.left.floor()), x1 = math.min(w, r.right.ceil());
+    final y0 = math.max(0, r.top.floor()), y1 = math.min(h, r.bottom.ceil());
+    for (var y = y0; y < y1; y++) {
+      for (var x = x0; x < x1; x++) {
+        final i = y * w + x;
+        if (ink[i] == 0 && outside[i] == 0) vals.add(raw[i]);
+      }
+    }
+    if (vals.length < 8) return 255;
+    vals.sort();
+    return vals[vals.length ~/ 2].toDouble();
+  }
+
+  /// Grey or coloured bars behind a text line (e.g. a section heading). The
+  /// background beside the text is compared with the paper above and below
+  /// it, so lighting gradients in photos don't count as shading.
   List<(Rect, int)> _shades(List<_Row> rows) {
     final out = <(Rect, int)>[];
     for (final r in rows) {
-      final b = r.box;
-      final cy = b.center.dy.round();
-      double sideLevel(int from, int to) {
-        final vals = <int>[];
-        for (var x = math.max(0, from); x < math.min(w, to); x++) {
-          for (var y = math.max(0, cy - 2); y <= math.min(h - 1, cy + 2); y++) {
-            final i = y * w + x;
-            if (ink[i] == 0) vals.add(norm[i]);
-          }
-        }
-        if (vals.length < 10) return 255;
-        vals.sort();
-        return vals[vals.length ~/ 2].toDouble();
+      final hs = r.words.map((x) => x.word.box.height).toList()..sort();
+      final lh = hs[hs.length ~/ 2];
+      final tops = r.words.map((x) => x.word.box.top).toList()..sort();
+      final top = tops[tops.length ~/ 2];
+      final b = Rect.fromLTRB(r.box.left, top, r.box.right, top + lh);
+      final probe = w * 0.03;
+      final left = _behind(Rect.fromLTRB(b.left - probe, b.top + lh * 0.2, b.left - 3, b.bottom - lh * 0.2));
+      if (debug != null && r.words.length > 2) {
+        debug!('shade ${r.words.map((x) => x.word.text).take(3).join(' ')} L=$left R=${_behind(Rect.fromLTRB(b.right + 3, b.top + lh * 0.2, b.right + probe, b.bottom - lh * 0.2))} A=${_paperLevel(Rect.fromLTRB(b.left, b.top - lh * 3.2, b.right, b.top - lh * 2.2))} B=${_paperLevel(Rect.fromLTRB(b.left, b.bottom + lh * 2.2, b.right, b.bottom + lh * 3.2))}', Uint8List(0));
       }
-
-      final probe = (w * 0.03).round();
-      final left = sideLevel(b.left.round() - probe, b.left.round() - 2);
-      final right = sideLevel(b.right.round() + 2, b.right.round() + probe);
-      if (left > 228 || right > 228) continue;
+      final right = _behind(Rect.fromLTRB(b.right + 3, b.top + lh * 0.2, b.right + probe, b.bottom - lh * 0.2));
+      final above = _paperLevel(Rect.fromLTRB(b.left, b.top - lh * 3.2, b.right, b.top - lh * 2.2));
+      final below = _paperLevel(Rect.fromLTRB(b.left, b.bottom + lh * 2.2, b.right, b.bottom + lh * 3.2));
+      final paper = math.max(above == 255 ? 0.0 : above, below == 255 ? 0.0 : below);
+      if (paper == 0) continue;
+      if (left > paper - 16 || right > paper - 16) continue;
       final level = (left + right) / 2;
-      bool shaded(int x, int y) {
-        var n = 0, s = 0;
-        for (var yy = math.max(0, y - 1); yy <= math.min(h - 1, y + 1); yy++) {
-          for (var xx = math.max(0, x - 1); xx <= math.min(w - 1, x + 1); xx++) {
-            final i = yy * w + xx;
-            if (ink[i] == 0) {
-              n++;
-              s += norm[i];
-            }
-          }
-        }
-        return n > 0 && s / n < math.min(234, level + 14);
-      }
-
+      final limit = math.max((level + paper) / 2, paper - 9);
+      bool shaded(double x, double y) => _behind(Rect.fromCenter(center: Offset(x, y), width: 5, height: 5)) < limit;
       // Extend sideways and vertically until paper is reached.
-      var x0 = b.left.round(), x1 = b.right.round();
-      while (x0 > 0 && shaded(x0 - 3, cy)) {
+      final cy = b.center.dy;
+      var x0 = b.left - 3, x1 = b.right + 3;
+      bool paperAt(double x) => outside[cy.round().clamp(0, h - 1) * w + x.round().clamp(0, w - 1)] == 0;
+      while (x0 > 3 && paperAt(x0 - 3) && shaded(x0 - 3, cy)) {
         x0 -= 3;
       }
-      while (x1 < w - 1 && shaded(x1 + 3, cy)) {
+      while (x1 < w - 4 && paperAt(x1 + 3) && shaded(x1 + 3, cy)) {
         x1 += 3;
       }
-      final probeXs = [x0 + 6, (x0 + b.left.round()) ~/ 2, (x1 + b.right.round()) ~/ 2, x1 - 6];
-      var y0 = b.top.round(), y1 = b.bottom.round();
-      while (y0 > 0 && probeXs.where((x) => shaded(x, y0 - 2)).length >= 3) {
+      final probeXs = [x0 + 6, (x0 + b.left) / 2, (x1 + b.right) / 2, x1 - 6];
+      var y0 = b.top, y1 = b.bottom;
+      while (y0 > 3 && probeXs.where((x) => shaded(x, y0 - 2)).length >= 3) {
         y0 -= 2;
       }
-      while (y1 < h - 1 && probeXs.where((x) => shaded(x, y1 + 2)).length >= 3) {
+      while (y1 < h - 4 && probeXs.where((x) => shaded(x, y1 + 2)).length >= 3) {
         y1 += 2;
       }
-      final band = Rect.fromLTRB(x0.toDouble(), y0.toDouble(), x1.toDouble(), y1.toDouble());
+      final band = Rect.fromLTRB(x0, y0, x1, y1);
       // A band is wider than its text and not taller than a few lines.
-      if (band.width < b.width + w * 0.06 || band.height > b.height * 4 || band.height < b.height * 1.05) continue;
-      final fill = _fill(band.deflate(2));
+      if (band.width < b.width + w * 0.06 || band.height > lh * 4 || band.height < lh * 1.05) continue;
+      final fill = _fill(band.deflate(3), paper);
       if (fill == null) continue;
       if (out.any((o) => o.$1.overlaps(band))) continue;
       out.add((band, fill));
@@ -915,6 +1296,18 @@ class _ScanAnalyzer {
   // ---- words → page points ------------------------------------------------
 
   LLine _toLine(List<LWordPx> words) {
+    // Segments: words separated by gaps wider than about a word height.
+    final hs = words.map((x) => x.word.box.height).toList()..sort();
+    final gapLimit = hs[hs.length ~/ 2] * 1.3;
+    var seg = <LWordPx>[];
+    for (final x in words) {
+      if (seg.isNotEmpty && x.word.box.left - seg.last.word.box.right > gapLimit) {
+        _smoothBold(seg);
+        seg = [];
+      }
+      seg.add(x);
+    }
+    _smoothBold(seg);
     final ws = <LWord>[];
     for (final x in words) {
       final wd = x.word;
@@ -923,7 +1316,7 @@ class _ScanAnalyzer {
           bold: x.bold,
           underline: x.underline,
           color: _inkColor(wd.box),
-          confidence: markUncertain ? wd.confidence : null,
+          confidence: wd.confidence,
           font: 'Arial'));
     }
     final line = LLine(ws);
@@ -954,15 +1347,26 @@ class _ScanAnalyzer {
   /// Font size from the measured width of the words (a font of the right
   /// size reproduces the line length), checked against their height.
   static void _fitSize(LLine l) {
-    var ink = 0.0, adv = 0.0;
-    for (final wd in l.words) {
+    // Single punctuation marks have unreliable boxes; leave them out.
+    final words = l.words.where((w) => w.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').isNotEmpty && (w.confidence ?? 1) >= 0.3).toList();
+    if (words.isEmpty) {
+      // Nothing reliable to measure: the page's common size is used.
+      for (final wd in l.words) {
+        wd.size = 0;
+      }
+      return;
+    }
+    final use = words;
+    var ink = 0.0, adv = 0.0, chars = 0;
+    for (final wd in use) {
       ink += wd.box.width;
       adv += textAdvance(wd.text, bold: wd.bold) - 0.07; // side bearings
+      chars += wd.text.length;
     }
     final byWidth = adv <= 0 ? 0.0 : ink / adv;
     // Height of capitals/ascenders ≈ 0.72 em; with descenders ≈ 0.93 em.
     final hs = <double>[];
-    for (final wd in l.words) {
+    for (final wd in use) {
       final t = wd.text;
       final desc = RegExp(r'[gjpqy,;()\[\]{}@$]').hasMatch(t);
       final asc = RegExp(r'[A-Z0-9bdfhklt/\\|!?:]').hasMatch(t);
@@ -972,9 +1376,20 @@ class _ScanAnalyzer {
         hs.add(wd.box.height / (desc ? (asc ? 0.93 : 0.73) : 0.73));
       }
     }
-    final byHeight = median(hs);
+    var byHeight = median(hs);
+    // A box much taller than its width suggests was stretched (an underline
+    // or a border below the word): its height is not used.
+    if (byWidth > 0 && byHeight > byWidth * 1.3) byHeight = byWidth;
     var size = byWidth > 0 ? byWidth : byHeight;
-    if (byHeight > 0) size = clampD(size, byHeight * 0.7, byHeight * 1.35);
+    // Short text measures its width poorly: trust its height more.
+    // Long text measures its width reliably (wide, heavy faces included).
+    if (byHeight > 0) {
+      size = chars < 8
+          ? clampD(size, byHeight * 0.85, byHeight * 1.15)
+          : chars < 16
+              ? clampD(size, byHeight * 0.7, byHeight * 1.35)
+              : clampD(size, byHeight * 0.65, byHeight * 1.6);
+    }
     for (final wd in l.words) {
       wd.size = size;
     }
@@ -988,7 +1403,8 @@ class _ScanAnalyzer {
       for (final t in page.tables)
         for (final c in t.cells) ...c.lines,
     ];
-    final sizes = lines.map((l) => l.size).toList()..sort();
+    final sizes = lines.map((l) => l.size).where((v) => v > 0).toList()..sort();
+    if (sizes.isEmpty) return;
     final groups = <List<double>>[];
     for (final s in sizes) {
       if (groups.isNotEmpty && s <= groups.last.first * 1.09) {
@@ -998,7 +1414,25 @@ class _ScanAnalyzer {
       }
     }
     final centers = [for (final g in groups) halfPoint(median(g))];
+    // The size most text on the page uses (by characters).
+    final weight = <double, int>{};
     for (final l in lines) {
+      if (l.size <= 0) continue;
+      var best = centers.first;
+      for (final c in centers) {
+        if ((c - l.size).abs() < (best - l.size).abs()) best = c;
+      }
+      weight[best] = (weight[best] ?? 0) + l.text.length;
+    }
+    final common = weight.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    for (final l in lines) {
+      // Lines read with very low confidence have unreliable boxes.
+      if (l.size <= 0) {
+        for (final wd in l.words) {
+          wd.size = common;
+        }
+        continue;
+      }
       var best = centers.first;
       for (final c in centers) {
         if ((c - l.size).abs() < (best - l.size).abs()) best = c;
