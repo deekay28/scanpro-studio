@@ -24,7 +24,7 @@ Legend: ✅ complete · 🟡 partial (limits described) · ⏳ not implemented
 ### Conversion Centre
 | Feature | Status | Notes |
 |---|---|---|
-| PDF → Word (DOCX), **editable** mode (paragraphs, headings, lists, tables, images) and **layout** mode (line breaks, indents, page breaks) | ✅ | Warnings for multi-column pages, substituted fonts, scanned pages, likely equations and handwriting |
+| PDF → Word (DOCX): **Faithful layout** (page-sized original image per page), **Editable document** (text, tables, shaded bands and pictures rebuilt at their original positions; scans straightened and read with OCR, seals/stamps/signatures/QR codes kept as pictures) and **Automatic** (per page) | ✅ | See [PDF_TO_WORD_LAYOUT.md](PDF_TO_WORD_LAYOUT.md): diagnosis, stages, measured visual-comparison results and limits. Uncertain OCR words are highlighted |
 | PDF → Excel (XLSX): ruled and borderless tables, typed numbers/dates/currency, one sheet per table or per page, source note per sheet | ✅ | Uncertain cells keep their original text and are highlighted. If no table is found, lines can be exported instead |
 | Table **review before export**: edit cells, delete/merge/split/insert columns, delete rows, set the header row; export XLSX or CSV | ✅ | PDF → Excel/CSV and PowerPoint → Excel, single file |
 | PDF → PowerPoint: **visual** (page images, labelled) and **editable** (text boxes + pictures) | ✅ | Scanned pages become labelled picture slides |
@@ -189,7 +189,7 @@ All were run with `flutter test` on Linux (Flutter 3.47.8). CI runs the same tes
 ## 7. Known limitations
 
 - Office → PDF is an approximation (fonts, shapes, SmartArt, themes, complex layout). Use Microsoft Office or LibreOffice when exact layout matters.
-- PDF → Word can't recover real columns, text boxes, equations or handwriting as editable structure; it warns when they're likely present.
+- PDF → Word can't recover real columns, text boxes, equations or handwriting as editable structure; it warns when they're likely present. Layout-preserving limits (bold on photos, paper curl, estimated fonts) are listed in [PDF_TO_WORD_LAYOUT.md](PDF_TO_WORD_LAYOUT.md) §5.
 - Table detection works on ruled grids and clearly aligned columns. Merged cells and irregular tables need the review screen.
 - Hindi text is extracted and converted, but complex Devanagari shaping in generated PDFs depends on the font renderer.
 - Form and link coordinates assume unrotated pages; rotated pages may place new fields offset.

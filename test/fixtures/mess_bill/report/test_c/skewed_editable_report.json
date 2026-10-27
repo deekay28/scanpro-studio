@@ -1,0 +1,136 @@
+{
+  "label": "skewed_editable",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.0,
+      842.0
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 1,
+  "docx_text_runs": 98,
+  "docx_tables": 1,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.7422,
+      "mean_abs_diff": 53.75,
+      "pixels_differing_over_64": 0.2383,
+      "ocr_words_source": 48,
+      "ocr_words_output": 46,
+      "matched_words": 36,
+      "word_recall": 0.75,
+      "word_precision": 0.783,
+      "displacement_pt_median": 3.32,
+      "displacement_pt_p90": 7.64,
+      "displacement_pt_max": 10.46,
+      "largest_displacements": [
+        {
+          "word": "on",
+          "source": [
+            501,
+            170
+          ],
+          "output": [
+            501,
+            159
+          ],
+          "pt": 10.5
+        },
+        {
+          "word": "revenue",
+          "source": [
+            125,
+            148
+          ],
+          "output": [
+            125,
+            159
+          ],
+          "pt": 10.4
+        },
+        {
+          "word": "focused",
+          "source": [
+            477,
+            168
+          ],
+          "output": [
+            476,
+            158
+          ],
+          "pt": 9.4
+        },
+        {
+          "word": "2024",
+          "source": [
+            294,
+            97
+          ],
+          "output": [
+            296,
+            89
+          ],
+          "pt": 7.6
+        },
+        {
+          "word": "strategy",
+          "source": [
+            441,
+            167
+          ],
+          "output": [
+            441,
+            160
+          ],
+          "pt": 7.2
+        },
+        {
+          "word": "services,",
+          "source": [
+            151,
+            163
+          ],
+          "output": [
+            152,
+            170
+          ],
+          "pt": 6.8
+        },
+        {
+          "word": "increased",
+          "source": [
+            167,
+            152
+          ],
+          "output": [
+            167,
+            158
+          ],
+          "pt": 6.5
+        },
+        {
+          "word": "across",
+          "source": [
+            204,
+            154
+          ],
+          "output": [
+            204,
+            159
+          ],
+          "pt": 5.8
+        }
+      ]
+    }
+  ]
+}

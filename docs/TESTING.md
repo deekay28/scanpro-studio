@@ -69,9 +69,15 @@ PDF and a password-protected PDF.
 12. 300+ page PDF: page navigation and thumbnails stay responsive; saving completes.
 
 ## Workflow H – Conversion Centre (see docs/DOCUMENT_SUITE.md)
-1. Tools → Conversion centre → PDF to Word → choose a 3-page office PDF → Editable → Convert. The job
-   screen shows progress, then Done with notes. Preview, then Share → open in Word / Google Docs.
-2. Repeat with Keep layout, and with a scanned PDF (OCR on, then OCR off: the job fails with "Turn on OCR").
+1. Tools → Conversion centre → PDF to Word → choose a 3-page office PDF → Editable document → Convert. The job
+   screen shows progress, then Done with notes. Preview, then Share → open in Word / Google Docs: headings,
+   table and image sit where they are in the PDF; same page count and size.
+2. Photograph a printed bill (tilted, on a desk) → scan to PDF → PDF to Word:
+   - Automatic: the notes say the page was kept as a page image; Word shows the photo, not editable.
+   - Faithful layout: same, at the chosen resolution (Advanced).
+   - Editable document: centred headings, shaded band, ruled table with right-aligned amounts, QR code /
+     seal / signature as pictures in place, low-confidence words highlighted. Compare side by side with the
+     PDF and note differences. Turn OCR off: the page is kept as an image and the notes say so.
 3. PDF to Excel with a bank statement → Review tables → merge two columns, delete one, fix a cell → Export
    XLSX → open in Excel/Sheets: numbers are numbers, flagged cells highlighted.
 4. PDF to images: PNG, 300 dpi, pages "2-3", ZIP → estimated size shown → open the ZIP.

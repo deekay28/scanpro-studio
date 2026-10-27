@@ -1,0 +1,136 @@
+{
+  "label": "messbill_faithful",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.276,
+      841.89
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 1,
+  "docx_text_runs": 0,
+  "docx_tables": 0,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.9994,
+      "mean_abs_diff": 0.2,
+      "pixels_differing_over_64": 0.0,
+      "ocr_words_source": 100,
+      "ocr_words_output": 99,
+      "matched_words": 98,
+      "word_recall": 0.98,
+      "word_precision": 0.99,
+      "displacement_pt_median": 0.0,
+      "displacement_pt_p90": 0.0,
+      "displacement_pt_max": 3.32,
+      "largest_displacements": [
+        {
+          "word": "qr",
+          "source": [
+            253,
+            730
+          ],
+          "output": [
+            251,
+            732
+          ],
+          "pt": 3.3
+        },
+        {
+          "word": "code",
+          "source": [
+            292,
+            732
+          ],
+          "output": [
+            289,
+            732
+          ],
+          "pt": 2.5
+        },
+        {
+          "word": "mess",
+          "source": [
+            444,
+            593
+          ],
+          "output": [
+            443,
+            594
+          ],
+          "pt": 0.8
+        },
+        {
+          "word": "secretary",
+          "source": [
+            500,
+            593
+          ],
+          "output": [
+            499,
+            594
+          ],
+          "pt": 0.8
+        },
+        {
+          "word": "and",
+          "source": [
+            234,
+            696
+          ],
+          "output": [
+            233,
+            695
+          ],
+          "pt": 0.5
+        },
+        {
+          "word": "cyber",
+          "source": [
+            167,
+            256
+          ],
+          "output": [
+            167,
+            256
+          ],
+          "pt": 0.4
+        },
+        {
+          "word": "at",
+          "source": [
+            365,
+            660
+          ],
+          "output": [
+            365,
+            660
+          ],
+          "pt": 0.4
+        },
+        {
+          "word": "officers'",
+          "source": [
+            327,
+            81
+          ],
+          "output": [
+            327,
+            81
+          ],
+          "pt": 0.4
+        }
+      ]
+    }
+  ]
+}

@@ -163,6 +163,12 @@ extension PdfiumTools on PdfiumSession {
           if (!images || bx.width < 4 || bx.height < 4) continue;
           final png = _imagePng(page, o, maxImageSide);
           if (png != null) imgs.add(PdfImageBlock(bx, png.$1, png.$2, png.$3));
+        } else if (type == FPDF_PAGEOBJ_FORM) {
+          // A page placed as a template (e.g. a scan merged into another PDF).
+          if (_formHasImage(o, 0)) {
+            final clipped = PdfiumSession._objBounds(o, g).intersect(Offset.zero & size);
+            if (clipped.width > 0 && clipped.height > 0) imageArea += clipped.width * clipped.height;
+          }
         } else if (type == FPDF_PAGEOBJ_PATH) {
           final bx = PdfiumSession._objBounds(o, g);
           if (bx.width > size.width * 0.95 && bx.height > size.height * 0.95) continue;
@@ -187,6 +193,17 @@ extension PdfiumTools on PdfiumSession {
       p.FPDFText_ClosePage(tp);
       p.FPDF_ClosePage(page);
     }
+  }
+
+  bool _formHasImage(FPDF_PAGEOBJECT form, int depth) {
+    final p = _lib;
+    final n = p.FPDFFormObj_CountObjects(form);
+    for (var i = 0; i < n; i++) {
+      final o = p.FPDFFormObj_GetObject(form, i);
+      final t = p.FPDFPageObj_GetType(o);
+      if (t == FPDF_PAGEOBJ_IMAGE || (t == FPDF_PAGEOBJ_FORM && depth < 4 && _formHasImage(o, depth + 1))) return true;
+    }
+    return false;
   }
 
   /// The image as drawn (masks applied), as PNG, downscaled to [maxSide].

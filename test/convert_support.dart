@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
+
 /// Writes [bytes] to a temp file and opens it with python-docx / openpyxl /
 /// python-pptx (independent readers). Returns their JSON summary.
 Map<String, dynamic> officeSummary(Uint8List bytes, String ext) {
@@ -48,3 +50,18 @@ List<(String, double, double, double, double, double)>? tesseractWords(Uint8List
 }
 
 bool get hasTesseract => Process.runSync('which', ['tesseract']).exitCode == 0;
+
+/// The pictures in a DOCX/XLSX/PPTX (path inside the package → bytes).
+Map<String, Uint8List> officeMedia(String path) {
+  final a = ZipDecoder().decodeBytes(File(path).readAsBytesSync());
+  return {
+    for (final f in a.files)
+      if (f.isFile && f.name.contains('/media/')) f.name: Uint8List.fromList(f.content as List<int>),
+  };
+}
+
+/// One XML part of an Office package as text.
+String officeXml(String path, String part) {
+  final a = ZipDecoder().decodeBytes(File(path).readAsBytesSync());
+  return utf8.decode(a.files.firstWhere((f) => f.name == part).content as List<int>);
+}

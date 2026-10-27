@@ -1,0 +1,220 @@
+{
+  "label": "sizes_editable",
+  "source_pages": 3,
+  "output_pages": 3,
+  "source_sizes_pt": [
+    [
+      595.28,
+      841.89
+    ],
+    [
+      595.28,
+      419.53
+    ],
+    [
+      612.0,
+      792.0
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ],
+    [
+      595.304,
+      419.556
+    ],
+    [
+      612.0,
+      792.0
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 0,
+  "docx_text_runs": 19,
+  "docx_tables": 0,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.9967,
+      "mean_abs_diff": 0.28,
+      "pixels_differing_over_64": 0.0014,
+      "ocr_words_source": 4,
+      "ocr_words_output": 4,
+      "matched_words": 4,
+      "word_recall": 1.0,
+      "word_precision": 1.0,
+      "displacement_pt_median": 1.08,
+      "displacement_pt_p90": 1.08,
+      "displacement_pt_max": 1.08,
+      "largest_displacements": [
+        {
+          "word": "portrait",
+          "source": [
+            171,
+            72
+          ],
+          "output": [
+            172,
+            72
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "page",
+          "source": [
+            71,
+            72
+          ],
+          "output": [
+            72,
+            72
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "in",
+          "source": [
+            104,
+            70
+          ],
+          "output": [
+            105,
+            70
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "a4",
+          "source": [
+            127,
+            70
+          ],
+          "output": [
+            127,
+            70
+          ],
+          "pt": 0.7
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "ssim": 0.9929,
+      "mean_abs_diff": 0.62,
+      "pixels_differing_over_64": 0.0033,
+      "ocr_words_source": 4,
+      "ocr_words_output": 4,
+      "matched_words": 4,
+      "word_recall": 1.0,
+      "word_precision": 1.0,
+      "displacement_pt_median": 1.08,
+      "displacement_pt_p90": 1.44,
+      "displacement_pt_max": 1.44,
+      "largest_displacements": [
+        {
+          "word": "landscape",
+          "source": [
+            184,
+            72
+          ],
+          "output": [
+            185,
+            72
+          ],
+          "pt": 1.4
+        },
+        {
+          "word": "page",
+          "source": [
+            71,
+            72
+          ],
+          "output": [
+            72,
+            72
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "in",
+          "source": [
+            104,
+            70
+          ],
+          "output": [
+            105,
+            70
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "a5",
+          "source": [
+            127,
+            70
+          ],
+          "output": [
+            127,
+            70
+          ],
+          "pt": 0.4
+        }
+      ]
+    },
+    {
+      "page": 3,
+      "ssim": 0.9972,
+      "mean_abs_diff": 0.22,
+      "pixels_differing_over_64": 0.0011,
+      "ocr_words_source": 3,
+      "ocr_words_output": 3,
+      "matched_words": 3,
+      "word_recall": 1.0,
+      "word_precision": 1.0,
+      "displacement_pt_median": 1.08,
+      "displacement_pt_p90": 1.44,
+      "displacement_pt_max": 1.44,
+      "largest_displacements": [
+        {
+          "word": "letter",
+          "source": [
+            140,
+            70
+          ],
+          "output": [
+            141,
+            70
+          ],
+          "pt": 1.4
+        },
+        {
+          "word": "page",
+          "source": [
+            71,
+            72
+          ],
+          "output": [
+            72,
+            72
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "in",
+          "source": [
+            104,
+            70
+          ],
+          "output": [
+            105,
+            70
+          ],
+          "pt": 1.1
+        }
+      ]
+    }
+  ]
+}

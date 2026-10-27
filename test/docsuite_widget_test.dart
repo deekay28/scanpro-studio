@@ -58,8 +58,13 @@ void main() {
     expect(convert.onPressed, isNull);
     await tester.pumpWidget(const MaterialApp(home: ConversionSetupScreen(type: ConversionType.pdfToDocx)));
     await tester.pump();
-    expect(find.text('Editable text'), findsOneWidget);
-    expect(find.text('Keep layout'), findsOneWidget);
+    expect(find.text('Automatic'), findsOneWidget);
+    expect(find.text('Faithful layout'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Editable document'), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('Editable document'), findsOneWidget);
+    await tester.tap(find.text('Editable document'));
+    await tester.pump();
+    await tester.scrollUntilVisible(find.text('OCR for scanned pages'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('OCR for scanned pages'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

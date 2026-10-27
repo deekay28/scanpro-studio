@@ -321,9 +321,11 @@ class _PageWriter {
   /// the source (letter-spaced titles). Small differences are ignored and
   /// large ones limited.
   static double _tracking(List<LWord> words, double size) {
+    if (words.isEmpty || !words.every((w) => hasMetrics(w.font))) return 0;
     var target = 0.0, natural = 0.0, gaps = 0;
     for (final w in words) {
-      if (w.text.length < 2) continue;
+      // Short words and words read with low confidence measure poorly.
+      if (w.text.length < 2 || (w.confidence ?? 1) < 0.5) continue;
       target += w.box.width;
       // Ink is a little narrower than advance widths (side bearings).
       natural += textAdvance(w.text, bold: w.bold, italic: w.italic, serif: isSerifFont(w.font)) * size - size * 0.07;
@@ -339,6 +341,7 @@ class _PageWriter {
   /// starts in the source: the distance between the two words' left edges
   /// minus what word [a] (with letter spacing) and a plain space take up.
   static double _gapExtra(LWord a, LWord b, double size, double track) {
+    if (!hasMetrics(a.font) || !hasMetrics(b.font)) return 0;
     final serif = isSerifFont(a.font);
     final used = textAdvance(a.text, bold: a.bold, italic: a.italic, serif: serif) * size + a.text.length * track + textAdvance(' ', bold: b.bold, serif: serif) * size;
     return clampD(b.box.left - a.box.left - used, -size * 0.15, size * 1.5);
@@ -355,11 +358,19 @@ class _PageWriter {
         // The space's own font size sets its width (character spacing on a
         // lone space is not applied by every word processor).
         final space = textAdvance(' ', bold: w.bold, serif: isSerifFont(w.font));
-        final want = space * size + extra;
-        final spaceSize = extra.abs() < 0.2 ? size : clampD(want / space, 1, size * 4);
-        sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), (spaceSize * 2).round() / 2));
+        if (extra >= 0.2) {
+          // Wider gap: letter spacing on the space.
+          sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), size, tracking: extra, noHighlight: true));
+        } else if (extra <= -0.2) {
+          // Narrower gap: a smaller space (spacing on a lone space is not
+          // applied by every word processor). Never less than 60%.
+          final spaceSize = clampD((space * size + extra) / space, size * 0.6, size);
+          sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), (spaceSize * 2).round() / 2, noHighlight: true));
+        } else {
+          sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), size, noHighlight: true));
+        }
       }
-      sb.write(_run(w.text, w, size, tab: tabBefore && i == 0, tracking: track));
+      sb.write(_run(w.text, w, w.size > 0 && (w.size - size).abs() > 0.4 ? halfPoint(w.size) : size, tab: tabBefore && i == 0, tracking: track));
     }
     return sb.toString();
   }
@@ -367,7 +378,7 @@ class _PageWriter {
   static LWord _plain(LWord w) =>
       LWord(w.text, w.box, size: w.size, bold: w.bold, italic: w.italic, color: w.color, font: w.font, confidence: w.confidence);
 
-  String _run(String text, LWord w, double size, {bool tab = false, double tracking = 0}) {
+  String _run(String text, LWord w, double size, {bool tab = false, double tracking = 0, bool noHighlight = false}) {
     final pr = StringBuffer();
     final f = xmlEscape(w.font);
     pr.write('<w:rFonts w:ascii="$f" w:hAnsi="$f" w:cs="$f"/>');
@@ -377,7 +388,7 @@ class _PageWriter {
     final hs = (size * 2).round();
     if (tracking != 0) pr.write('<w:spacing w:val="${_tw(tracking)}"/>');
     pr.write('<w:sz w:val="$hs"/><w:szCs w:val="$hs"/>');
-    if (highlight && w.uncertain) pr.write('<w:highlight w:val="yellow"/>');
+    if (highlight && w.uncertain && !noHighlight) pr.write('<w:highlight w:val="yellow"/>');
     final sb = StringBuffer();
     if (tab) sb.write('<w:r><w:rPr>$pr</w:rPr><w:tab/></w:r>');
     if (w.underline) pr.write('<w:u w:val="single"/>');

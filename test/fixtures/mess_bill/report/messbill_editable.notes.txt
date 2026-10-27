@@ -1,0 +1,2 @@
+Page 1: 5 word(s) were recognised with low confidence and are highlighted; check them against the original.
+Page 1 (scan) rebuilt as editable text (OCR): 18 text line(s), 1 table(s), 1 shaded band(s), 3 picture(s) kept from the scan (qrCode, graphic, graphic). Fonts are estimated from the scan (Arial); bold text is detected from stroke width and may be missed.

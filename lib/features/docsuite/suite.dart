@@ -58,28 +58,18 @@ class DocSuite {
   }
 }
 
-/// ML Kit OCR on a rendered page. Lines are split into words whose boxes
-/// are spread over the line by character count.
+/// ML Kit OCR on a page image: recognised words with their own boxes (in
+/// pixels of the image) and confidences.
 Future<List<PdfWord>> mlKitOcr(Uint8List png, int width, int height, String script) async {
   final path = AppStorage.instance.tempPath('convert_ocr.png');
   await File(path).writeAsBytes(png);
   final ocr = OcrService();
   try {
-    final r = await ocr.recognizeFile(path, script: script, imageWidth: width, imageHeight: height);
-    final words = <PdfWord>[];
-    for (final l in r.lines) {
-      final parts = l.text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-      if (parts.isEmpty) continue;
-      final chars = parts.fold<int>(0, (n, w) => n + w.length) + parts.length - 1;
-      var x = l.left;
-      final per = (l.right - l.left) / (chars == 0 ? 1 : chars);
-      for (final w in parts) {
-        final wWidth = per * w.length;
-        words.add(PdfWord(w, Rect.fromLTWH(x, l.top, wWidth, l.bottom - l.top), confidence: l.confidence ?? (l.flagged ? 0.5 : 0.9)));
-        x += wWidth + per;
-      }
-    }
-    return words;
+    final words = await ocr.recognizeWords(path, script: script);
+    return [
+      for (final w in words)
+        PdfWord(w.text, Rect.fromLTRB(w.left, w.top, w.right, w.bottom), confidence: w.confidence ?? 0.8),
+    ];
   } finally {
     await ocr.dispose();
     final f = File(path);

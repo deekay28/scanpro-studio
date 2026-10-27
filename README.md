@@ -79,6 +79,7 @@ Full details, SDK evaluation and the complete/partial/unsupported checklist: **[
 
 ### Document suite: conversions, reader, compare, forms, security
 Full matrix (complete/partial/unsupported), architecture, licensing and acceptance results: **[docs/DOCUMENT_SUITE.md](docs/DOCUMENT_SUITE.md)**.
+PDF → Word modes (Faithful layout / Editable document / Automatic), the layout pipeline and its visual regression results: **[docs/PDF_TO_WORD_LAYOUT.md](docs/PDF_TO_WORD_LAYOUT.md)**.
 
 | Feature | Status | Notes |
 |---|---|---|

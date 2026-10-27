@@ -123,6 +123,10 @@ class LayoutPage {
   final LGraphic? background;
   final bool fromScan;
 
+  /// Scans only: regions (pixels of the analysed image) that look like text
+  /// but where OCR found no words; they can be read again.
+  List<Rect> unread = const [];
+
   LayoutPage(this.size, {List<LLine>? lines, List<LTable>? tables, List<LGraphic>? graphics, List<LShade>? shades, List<String>? warnings, this.background, this.fromScan = false})
       : lines = lines ?? [],
         tables = tables ?? [],
@@ -146,6 +150,13 @@ final _index = {for (var i = 0; i < fontCodes.length; i++) fontCodes[i]: i};
 bool isSerifFont(String family) {
   final f = family.toLowerCase();
   return f.contains('times') || f.contains('serif') && !f.contains('sans') || f.contains('georgia') || f.contains('garamond') || f.contains('cambria') || f.contains('book');
+}
+
+/// Whether [textAdvance] knows this font's widths (Arial, Helvetica, Times
+/// and their metric-compatible equivalents).
+bool hasMetrics(String family) {
+  final f = family.toLowerCase();
+  return f == 'arial' || f.startsWith('helvetica') || f.startsWith('liberation') || f == 'arimo' || f == 'tinos' || f.startsWith('times') || f == 'freesans';
 }
 
 /// Width of [text] at 1 pt in an Arial- or Times-compatible font.

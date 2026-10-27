@@ -13,7 +13,6 @@ import '../../pdf/pdf_service.dart';
 import '../../pdf_editor/engine/pdfium_engine.dart' show RasterFormat;
 import '../conversion_jobs.dart';
 import '../conversion_service.dart';
-import '../pdf_to_doc.dart' show WordMode;
 import 'output_preview.dart';
 import 'table_review_screen.dart';
 
@@ -267,7 +266,9 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
         pageRange: _range.text.trim(),
         ocr: _o.ocr,
         ocrScript: _o.ocrScript,
-        wordMode: _o.wordMode,
+        docxMode: _o.docxMode,
+        pageDpi: _o.pageDpi,
+        markUncertain: _o.markUncertain,
         pptxEditable: _o.pptxEditable,
         sheetPerPage: _o.sheetPerPage,
         allTextIfNoTable: _o.allTextIfNoTable,
@@ -290,7 +291,9 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
   ConversionOptions _with({
     bool? ocr,
     String? ocrScript,
-    WordMode? wordMode,
+    DocxMode? docxMode,
+    double? pageDpi,
+    bool? markUncertain,
     bool? pptxEditable,
     bool? sheetPerPage,
     bool? allTextIfNoTable,
@@ -309,7 +312,9 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
       ConversionOptions(
         ocr: ocr ?? _o.ocr,
         ocrScript: ocrScript ?? _o.ocrScript,
-        wordMode: wordMode ?? _o.wordMode,
+        docxMode: docxMode ?? _o.docxMode,
+        pageDpi: pageDpi ?? _o.pageDpi,
+        markUncertain: markUncertain ?? _o.markUncertain,
         pptxEditable: pptxEditable ?? _o.pptxEditable,
         sheetPerPage: sheetPerPage ?? _o.sheetPerPage,
         allTextIfNoTable: allTextIfNoTable ?? _o.allTextIfNoTable,
@@ -514,22 +519,53 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
       case ConversionType.pdfToDocx:
         return [
           const _Header('Word layout'),
-          SegmentedButton<WordMode>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: WordMode.editable, label: Text('Editable text')),
-              ButtonSegment(value: WordMode.layout, label: Text('Keep layout')),
+          for (final (mode, title, text) in const [
+            (DocxMode.automatic, 'Automatic', 'Scanned pages are kept as page images; digital pages become editable text. The result lists what was chosen for each page.'),
+            (DocxMode.faithful, 'Faithful layout', 'Every page looks exactly like the original (one page-sized picture per page). The text is a picture and cannot be edited.'),
+            (DocxMode.editable, 'Editable document', 'Real Word text, tables and pictures at their original positions. Scans are read with OCR; seals, signatures and QR codes stay pictures. Some visual differences remain.'),
+          ])
+            RadioListTile<DocxMode>(
+              contentPadding: EdgeInsets.zero,
+              value: mode,
+              groupValue: o.docxMode,
+              onChanged: (v) => _set(_with(docxMode: v)),
+              title: Text(title),
+              subtitle: Text(text),
+            ),
+          if (o.docxMode != DocxMode.faithful) ...[
+            ...ocrOpts,
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Highlight uncertain words'),
+              subtitle: const Text('Words OCR read with low confidence are highlighted for checking'),
+              value: o.markUncertain,
+              onChanged: (v) => _set(_with(markUncertain: v)),
+            ),
+          ],
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Advanced: page image quality'),
+            children: [
+              const Text('Used for pages kept as images. A scanned photo is copied unchanged whenever possible; other pages are rendered at this resolution.',
+                  style: TextStyle(fontSize: 12)),
+              LabeledSlider(
+                label: 'Resolution',
+                value: o.pageDpi,
+                min: 150,
+                max: 400,
+                format: (v) => '${v.round()} dpi',
+                onChanged: (v) => _set(_with(pageDpi: (v / 50).round() * 50.0)),
+              ),
+              LabeledSlider(
+                label: 'JPEG quality',
+                value: o.jpegQuality.toDouble().clamp(60, 100),
+                min: 60,
+                max: 100,
+                format: (v) => '${v.round()}',
+                onChanged: (v) => _set(_with(jpegQuality: v.round())),
+              ),
             ],
-            selected: {o.wordMode},
-            onSelectionChanged: (s) => _set(_with(wordMode: s.first)),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(o.wordMode == WordMode.editable
-                ? 'Flowing paragraphs, headings, lists and tables that are easy to edit.'
-                : 'Keeps line breaks, indents and page breaks closer to the PDF; harder to edit.'),
-          ),
-          ...ocrOpts,
         ];
       case ConversionType.pdfToXlsx || ConversionType.pdfToCsv:
         return [
@@ -651,7 +687,7 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
 }
 
 String _limitNote(ConversionType t) => switch (t) {
-      ConversionType.pdfToDocx => 'Complex layouts (columns, text boxes, equations, handwriting) are simplified. Fonts are replaced by the closest standard Office font. You will see warnings for anything that may not have converted exactly.',
+      ConversionType.pdfToDocx => 'Each PDF page becomes one Word page of the same size. Editable mode rebuilds text at its original position; fonts are matched or estimated, and the notes after conversion say what may differ. Nothing is uploaded: OCR runs on this device.',
       ConversionType.pdfToXlsx || ConversionType.pdfToCsv => 'Tables are detected from ruled lines or aligned columns. Uncertain cells keep their original text and are flagged. Review tables before exporting to fix columns.',
       ConversionType.pdfToPptx => 'Editable slides use text boxes positioned like the PDF; exact fonts and vector graphics are not reproduced.',
       ConversionType.docxToPdf || ConversionType.xlsxToPdf || ConversionType.pptxToPdf =>

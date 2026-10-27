@@ -72,6 +72,36 @@ class OcrService {
     );
   }
 
+  /// Words with their own boxes and confidences (ML Kit "elements"), for
+  /// layout reconstruction. Falls back to splitting a line evenly when the
+  /// engine returns no elements for it.
+  Future<List<({String text, double left, double top, double right, double bottom, double? confidence})>> recognizeWords(String absPath, {required String script}) async {
+    final r = await _recognizer(script).processImage(InputImage.fromFilePath(absPath));
+    final out = <({String text, double left, double top, double right, double bottom, double? confidence})>[];
+    for (final b in r.blocks) {
+      for (final l in b.lines) {
+        if (l.elements.isNotEmpty) {
+          for (final e in l.elements) {
+            final box = e.boundingBox;
+            out.add((text: e.text, left: box.left, top: box.top, right: box.right, bottom: box.bottom, confidence: e.confidence ?? _confidenceOf(l)));
+          }
+          continue;
+        }
+        final parts = l.text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+        if (parts.isEmpty) continue;
+        final box = l.boundingBox;
+        final chars = parts.fold<int>(0, (n, w) => n + w.length) + parts.length - 1;
+        final per = (box.right - box.left) / (chars == 0 ? 1 : chars);
+        var x = box.left;
+        for (final w in parts) {
+          out.add((text: w, left: x, top: box.top, right: x + per * w.length, bottom: box.bottom, confidence: _confidenceOf(l)));
+          x += per * (w.length + 1);
+        }
+      }
+    }
+    return out;
+  }
+
   /// Uses the engine confidence when the plugin version exposes it.
   double? _confidenceOf(TextLine line) {
     try {

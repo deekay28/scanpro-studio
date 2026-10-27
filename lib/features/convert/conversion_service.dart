@@ -12,8 +12,12 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 
 import '../pdf/pdf_service.dart' show PdfService;
 import '../pdf_editor/engine/engine_worker.dart';
-import '../pdf_editor/engine/pdfium_engine.dart' show RasterFormat;
+import '../pdf_editor/engine/pdfium_engine.dart' show PageImage, RasterFormat;
 import 'doc_to_pdf.dart';
+import 'layout/layout_docx.dart';
+import 'layout/layout_model.dart';
+import 'layout/native_layout.dart';
+import 'layout/scan_analysis.dart';
 import 'model/page_content.dart';
 import 'office_conversions.dart';
 import 'ooxml/docx.dart';
@@ -51,13 +55,29 @@ enum ConversionType {
 
 enum ImageQuality { low, standard, high, print }
 
+/// How PDF → Word rebuilds pages.
+enum DocxMode {
+  /// Scanned pages as page images, digital pages as editable text.
+  automatic,
+
+  /// Every page as one page-sized picture: looks like the original, text
+  /// is not editable.
+  faithful,
+
+  /// Real Word text, tables and pictures at their original positions
+  /// (OCR for scanned pages).
+  editable,
+}
+
 /// Options for one job. Only the options that apply to the job's type are
 /// used; the UI shows just those.
 class ConversionOptions {
   final String pageRange; // "1-3, 5" (1-based); empty = all
   final bool ocr; // run OCR on scanned pages
   final String ocrScript; // latin | devanagari
-  final WordMode wordMode;
+  final DocxMode docxMode;
+  final double pageDpi; // faithful pages (when the page must be rendered)
+  final bool markUncertain; // highlight words read with low OCR confidence
   final bool pptxEditable;
   final bool sheetPerPage; // PDF→XLSX: one sheet per page instead of per table
   final bool allTextIfNoTable; // PDF→XLSX: export lines when no table is found
@@ -80,7 +100,9 @@ class ConversionOptions {
     this.pageRange = '',
     this.ocr = true,
     this.ocrScript = 'latin',
-    this.wordMode = WordMode.editable,
+    this.docxMode = DocxMode.automatic,
+    this.pageDpi = 300,
+    this.markUncertain = true,
     this.pptxEditable = false,
     this.sheetPerPage = false,
     this.allTextIfNoTable = true,
@@ -104,7 +126,9 @@ class ConversionOptions {
         'pr': pageRange,
         'ocr': ocr,
         'os': ocrScript,
-        'wm': wordMode.name,
+        'dm': docxMode.name,
+        'pd': pageDpi,
+        'mu': markUncertain,
         'pe': pptxEditable,
         'spp': sheetPerPage,
         'at': allTextIfNoTable,
@@ -128,7 +152,9 @@ class ConversionOptions {
         pageRange: j['pr'] as String? ?? '',
         ocr: j['ocr'] as bool? ?? true,
         ocrScript: j['os'] as String? ?? 'latin',
-        wordMode: WordMode.values.firstWhere((e) => e.name == j['wm'], orElse: () => WordMode.editable),
+        docxMode: DocxMode.values.firstWhere((e) => e.name == j['dm'], orElse: () => DocxMode.automatic),
+        pageDpi: (j['pd'] as num?)?.toDouble() ?? 300,
+        markUncertain: j['mu'] as bool? ?? true,
         pptxEditable: j['pe'] as bool? ?? false,
         sheetPerPage: j['spp'] as bool? ?? false,
         allTextIfNoTable: j['at'] as bool? ?? true,
@@ -307,6 +333,10 @@ class ConversionService {
         if (archive != null) await write('$base.zip', Uint8List.fromList(ZipEncoder().encode(archive)!));
         return;
       }
+      if (type == ConversionType.pdfToDocx) {
+        await _pdfToDocx(s, pages, base, o, write, warnings, progress, token);
+        return;
+      }
       // Structured content, with OCR for scanned pages.
       final needImages = type == ConversionType.pdfToDocx || type == ConversionType.pdfToHtml || (type == ConversionType.pdfToPptx && o.pptxEditable);
       final pageImages = <int, ({Uint8List bytes})>{};
@@ -314,10 +344,6 @@ class ConversionService {
       token.check();
       progress(0.85, 'Writing file…');
       switch (type) {
-        case ConversionType.pdfToDocx:
-          final r = await compute(_work, ('pdf2docx', [contents, o.wordMode.index, base])) as (Uint8List, List<String>);
-          warnings.addAll(r.$2);
-          await write('$base.docx', r.$1);
         case ConversionType.pdfToHtml:
           final r = await compute(_work, ('pdf2html', [contents, base])) as (Uint8List, List<String>);
           warnings.addAll(r.$2);
@@ -363,6 +389,112 @@ class ConversionService {
     } finally {
       s.close();
     }
+  }
+
+  /// PDF → Word. Each source page becomes one Word page of the same size:
+  /// - faithful: the page as one picture (the scan's own JPEG when the page
+  ///   is just a photo, otherwise rendered at [ConversionOptions.pageDpi]);
+  /// - editable: a digital page's own text, fonts, tables and images at
+  ///   their positions; a scanned page straightened and analysed (OCR,
+  ///   ruling lines, tables, shading, stamps/QR codes/signatures as
+  ///   pictures) and rebuilt with real text;
+  /// - automatic: scanned pages faithful, digital pages editable.
+  Future<void> _pdfToDocx(HostSession s, List<int> pages, String base, ConversionOptions o, Future<ConversionOutput> Function(String, Uint8List) write,
+      List<String> warnings, void Function(double, String) progress, CancelToken token) async {
+    final out = <LayoutPage>[];
+    var asImage = 0, rebuiltDigital = 0, noOcr = 0;
+    for (var k = 0; k < pages.length; k++) {
+      token.check();
+      final pi = pages[k];
+      final label = 'page ${pi + 1} of ${s.pageCount}';
+      progress(k / pages.length * 0.9, 'Reading $label…');
+      final c = await s.call<PageContent>('content', [pi, true]);
+      var faithful = o.docxMode == DocxMode.faithful || (o.docxMode == DocxMode.automatic && c.scanned);
+      if (!faithful && c.scanned && (ocr == null || !o.ocr)) {
+        faithful = true;
+        noOcr++;
+      }
+      if (faithful) {
+        progress(k / pages.length * 0.9, 'Copying $label as an image…');
+        final im = await s.call<PageImage>('pageImage', [pi, o.pageDpi, math.max(o.jpegQuality, 90), false, true]);
+        out.add(LayoutPage(c.size, background: LGraphic(im.box, im.bytes, im.ext, im.width, im.height, kind: GraphicKind.pageImage)));
+        asImage++;
+        continue;
+      }
+      if (!c.scanned) {
+        out.add(await compute(_work, ('nativeLayout', [c])) as LayoutPage);
+        rebuiltDigital++;
+        continue;
+      }
+      // Scanned page: analyse the photo at its own resolution.
+      progress(k / pages.length * 0.9, 'Straightening $label…');
+      final im = await s.call<PageImage>('pageImage', [pi, 200.0, 90, false, true]);
+      var scale = im.original ? im.width / im.box.width : 200 / 72;
+      scale = math.min(scale, 2600 / math.max(c.size.width, c.size.height));
+      final r = await s.call<RenderedPage>('renderOriginal', [pi, scale]);
+      final box = im.original ? im.box : Offset.zero & c.size;
+      final (rgba, w, h) = cropRgba(r.rgba, r.width, r.height, Rect.fromLTRB(box.left * scale, box.top * scale, box.right * scale, box.bottom * scale));
+      final prep = await compute(_work, ('prepareScan', [rgba, w, h, box])) as PreparedScan;
+      token.check();
+      progress(k / pages.length * 0.9, 'Recognising text on $label…');
+      final words = await ocr!(prep.png, prep.rectified.width, prep.rectified.height, o.ocrScript);
+      token.check();
+      progress(k / pages.length * 0.9, 'Rebuilding the layout of $label…');
+      var page = await compute(_work, ('scanLayout', [prep, words, c.size])) as LayoutPage;
+      // Second pass: text the OCR engine skipped (often table cells) is read
+      // again region by region, enlarged.
+      if (page.unread.isNotEmpty) {
+        progress(k / pages.length * 0.9, 'Reading ${page.unread.length} missed area(s) on $label…');
+        final more = await _readRegions(prep, page.unread, words, o.ocrScript, token);
+        if (more.isNotEmpty) page = await compute(_work, ('scanLayout', [prep, [...words, ...more], c.size])) as LayoutPage;
+      }
+      for (final w in page.warnings) {
+        warnings.add('Page ${pi + 1}: $w');
+      }
+      final kinds = page.graphics.map((g) => g.kind).toList();
+      warnings.add('Page ${pi + 1} (scan) rebuilt as editable text (OCR): ${page.lines.length} text line(s), ${page.tables.length} table(s), '
+          '${page.shades.length} shaded band(s), ${kinds.length} picture(s) kept from the scan'
+          '${kinds.isEmpty ? '' : ' (${kinds.map((k) => k.name).join(', ')})'}. Fonts are estimated from the scan (Arial); bold text is detected from stroke width and may be missed.');
+      out.add(page);
+    }
+    token.check();
+    progress(0.92, 'Writing the Word file…');
+    final docx = await compute(_work, ('layoutDocx', [out, base, o.markUncertain])) as Uint8List;
+    if (asImage > 0) {
+      warnings.add('$asImage page(s) were kept as page images (${o.docxMode == DocxMode.automatic ? 'Automatic: scanned pages' : 'Faithful layout'}). '
+          'They look like the original, but their text is a picture and cannot be edited in Word. Choose "Editable document" to rebuild them as text.');
+    }
+    if (noOcr > 0) warnings.add('$noOcr scanned page(s) were kept as images because OCR is off or not available.');
+    if (rebuiltDigital > 0) {
+      warnings.add('$rebuiltDigital digital page(s) rebuilt with their own text, fonts, tables and images at their original positions. '
+          'Fonts that are not installed where the file is opened are replaced by similar ones.');
+    }
+    await write('$base.docx', docx);
+  }
+
+  /// OCR on parts of a prepared scan; words come back in the scan's pixels.
+  Future<List<PdfWord>> _readRegions(PreparedScan prep, List<Rect> regions, List<PdfWord> known, String script, CancelToken token) async {
+    final full = prep.rectified;
+    final out = <PdfWord>[];
+    for (final r in regions) {
+      token.check();
+      final x0 = r.left.floor().clamp(0, full.width - 1), y0 = r.top.floor().clamp(0, full.height - 1);
+      final cw = (r.right.ceil() - x0).clamp(1, full.width - x0), ch = (r.bottom.ceil() - y0).clamp(1, full.height - y0);
+      final k = ch < 60 ? 2 : 1; // small text reads better enlarged
+      final png = await compute(_cropPng, (full.data, full.width, x0, y0, cw, ch, k));
+      final words = await ocr!(png, cw * k, ch * k, script);
+      for (final wd in words) {
+        final b = wd.box;
+        final box = Rect.fromLTRB(x0 + b.left / k, y0 + b.top / k, x0 + b.right / k, y0 + b.bottom / k);
+        // Region margins can catch the edge of a word that was already read.
+        final seen = [...known, ...out].any((o) {
+          final i = o.box.intersect(box);
+          return i.width > 0 && i.height > 0 && i.width * i.height > box.width * box.height * 0.4;
+        });
+        if (!seen && wd.text.trim().isNotEmpty) out.add(PdfWord(wd.text, box, confidence: wd.confidence));
+      }
+    }
+    return out;
   }
 
   /// Reads the structured content of [pages], running OCR on scanned pages
@@ -483,9 +615,14 @@ Object _work((String, List<Object?>) msg) {
       return (DocPdfRenderer(a[1] as Uint8List).render(h.doc), h.notes);
     case 'text':
       return DocPdfRenderer(a[1] as Uint8List).render(textToDoc(utf8.decode(a[0] as Uint8List, allowMalformed: true), title: a[2] as String));
-    case 'pdf2docx':
-      final b = buildDoc((a[0] as List).cast<PageContent>(), mode: WordMode.values[a[1] as int], title: a[2] as String);
-      return (writeDocx(b.doc), b.warnings);
+    case 'layoutDocx':
+      return writeLayoutDocx((a[0] as List).cast<LayoutPage>(), title: a[1] as String, highlightUncertain: a[2] as bool);
+    case 'prepareScan':
+      return prepareScan(a[0] as Uint8List, a[1] as int, a[2] as int, a[3] as Rect);
+    case 'scanLayout':
+      return buildScanLayout(a[0] as PreparedScan, (a[1] as List).cast<PdfWord>(), a[2] as Size);
+    case 'nativeLayout':
+      return nativeLayout(a[0] as PageContent);
     case 'pdf2html':
       final b = buildDoc((a[0] as List).cast<PageContent>(), title: a[1] as String);
       return (utf8Bytes(docToHtml(b.doc)), b.warnings);
@@ -519,6 +656,20 @@ Object _work((String, List<Object?>) msg) {
     default:
       throw StateError('Unknown work $op');
   }
+}
+
+/// A region of an RGB image as PNG, enlarged [k] times.
+Uint8List _cropPng((Uint8List, int, int, int, int, int, int) a) {
+  final (data, width, x0, y0, cw, ch, k) = a;
+  var im = img.Image(width: cw, height: ch, numChannels: 3);
+  for (var y = 0; y < ch; y++) {
+    for (var x = 0; x < cw; x++) {
+      final j = ((y0 + y) * width + x0 + x) * 3;
+      im.setPixelRgb(x, y, data[j], data[j + 1], data[j + 2]);
+    }
+  }
+  if (k > 1) im = img.copyResize(im, width: cw * k, height: ch * k, interpolation: img.Interpolation.cubic);
+  return Uint8List.fromList(img.encodePng(im, level: 1));
 }
 
 /// Image files → PDF, one page per image (A4 with the image fitted, or a

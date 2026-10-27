@@ -48,7 +48,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update -y && sudo apt-get install -y libsqlite3-dev poppler-utils
+          sudo apt-get update -y && sudo apt-get install -y libsqlite3-dev poppler-utils tesseract-ocr
           flutter pub get
 
       - name: Static analysis

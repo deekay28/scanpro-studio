@@ -1,0 +1,256 @@
+{
+  "label": "report_editable",
+  "source_pages": 2,
+  "output_pages": 2,
+  "source_sizes_pt": [
+    [
+      595.0,
+      842.0
+    ],
+    [
+      595.0,
+      842.0
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ],
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 1,
+  "docx_text_runs": 130,
+  "docx_tables": 1,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.9527,
+      "mean_abs_diff": 3.41,
+      "pixels_differing_over_64": 0.017,
+      "ocr_words_source": 51,
+      "ocr_words_output": 53,
+      "matched_words": 48,
+      "word_recall": 0.941,
+      "word_precision": 0.906,
+      "displacement_pt_median": 0.72,
+      "displacement_pt_p90": 3.22,
+      "displacement_pt_max": 4.68,
+      "largest_displacements": [
+        {
+          "word": "units",
+          "source": [
+            185,
+            237
+          ],
+          "output": [
+            189,
+            238
+          ],
+          "pt": 4.7
+        },
+        {
+          "word": "1,200",
+          "source": [
+            186,
+            254
+          ],
+          "output": [
+            190,
+            256
+          ],
+          "pt": 4.5
+        },
+        {
+          "word": "38,250.50",
+          "source": [
+            311,
+            273
+          ],
+          "output": [
+            314,
+            275
+          ],
+          "pt": 4.1
+        },
+        {
+          "word": "south",
+          "source": [
+            73,
+            272
+          ],
+          "output": [
+            77,
+            273
+          ],
+          "pt": 3.4
+        },
+        {
+          "word": "revenue",
+          "source": [
+            309,
+            237
+          ],
+          "output": [
+            312,
+            238
+          ],
+          "pt": 3.2
+        },
+        {
+          "word": "report",
+          "source": [
+            198,
+            69
+          ],
+          "output": [
+            200,
+            69
+          ],
+          "pt": 2.2
+        },
+        {
+          "word": "region",
+          "source": [
+            78,
+            238
+          ],
+          "output": [
+            80,
+            238
+          ],
+          "pt": 1.9
+        },
+        {
+          "word": "new",
+          "source": [
+            168,
+            188
+          ],
+          "output": [
+            170,
+            188
+          ],
+          "pt": 1.4
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "ssim": 0.9909,
+      "mean_abs_diff": 0.77,
+      "pixels_differing_over_64": 0.0044,
+      "ocr_words_source": 18,
+      "ocr_words_output": 19,
+      "matched_words": 16,
+      "word_recall": 0.889,
+      "word_precision": 0.842,
+      "displacement_pt_median": 0.72,
+      "displacement_pt_p90": 1.8,
+      "displacement_pt_max": 11.52,
+      "largest_displacements": [
+        {
+          "word": "page",
+          "source": [
+            69,
+            820
+          ],
+          "output": [
+            81,
+            820
+          ],
+          "pt": 11.5
+        },
+        {
+          "word": "of",
+          "source": [
+            94,
+            819
+          ],
+          "output": [
+            92,
+            819
+          ],
+          "pt": 1.8
+        },
+        {
+          "word": "15/03/2024",
+          "source": [
+            248,
+            133
+          ],
+          "output": [
+            249,
+            133
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "expenses",
+          "source": [
+            98,
+            61
+          ],
+          "output": [
+            99,
+            61
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "paper",
+          "source": [
+            75,
+            116
+          ],
+          "output": [
+            76,
+            116
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "amount",
+          "source": [
+            399,
+            97
+          ],
+          "output": [
+            399,
+            97
+          ],
+          "pt": 0.7
+        },
+        {
+          "word": "annual",
+          "source": [
+            122,
+            19
+          ],
+          "output": [
+            122,
+            19
+          ],
+          "pt": 0.7
+        },
+        {
+          "word": "report",
+          "source": [
+            149,
+            20
+          ],
+          "output": [
+            150,
+            20
+          ],
+          "pt": 0.7
+        }
+      ]
+    }
+  ]
+}

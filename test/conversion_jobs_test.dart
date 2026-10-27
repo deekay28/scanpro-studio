@@ -123,7 +123,7 @@ void main() {
 
   test('scanned PDF uses OCR; without OCR the user is told text was not converted', () async {
     ocrCalls = 0;
-    final job = await jobs.enqueue(ConversionType.pdfToDocx, [(put('scan.pdf', scanPdf()), 'scan.pdf')], const ConversionOptions(), 'scan');
+    final job = await jobs.enqueue(ConversionType.pdfToDocx, [(put('scan.pdf', scanPdf()), 'scan.pdf')], const ConversionOptions(docxMode: DocxMode.editable), 'scan');
     await jobs.idle();
     expect(job.status, JobStatus.done, reason: job.error);
     expect(ocrCalls, 1);
