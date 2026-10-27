@@ -17,6 +17,8 @@ Object? runHostOp(String op, PdfiumSession? s, List<Object?> args, PdfiumEngine 
     case 'renderOriginal':
       final r = need().renderOriginal(args[0] as int, args[1] as double);
       return RenderedPage(r.rgba, r.width, r.height);
+    case 'pageImage':
+      return need().pageImage(args[0] as int, dpi: args[1] as double, quality: args[2] as int, png: args[3] as bool, allowOriginal: args[4] as bool);
     case 'pageSize':
       return need().pageSize(args[0] as int);
     case 'outline':

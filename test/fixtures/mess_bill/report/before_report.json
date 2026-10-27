@@ -1,0 +1,136 @@
+{
+  "label": "before",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.276,
+      841.89
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 0,
+  "docx_text_runs": 29,
+  "docx_tables": 1,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.5406,
+      "mean_abs_diff": 57.85,
+      "pixels_differing_over_64": 0.253,
+      "ocr_words_source": 100,
+      "ocr_words_output": 107,
+      "matched_words": 87,
+      "word_recall": 0.87,
+      "word_precision": 0.813,
+      "displacement_pt_median": 89.08,
+      "displacement_pt_p90": 211.65,
+      "displacement_pt_max": 436.85,
+      "largest_displacements": [
+        {
+          "word": "99,491.00",
+          "source": [
+            513,
+            362
+          ],
+          "output": [
+            76,
+            340
+          ],
+          "pt": 436.9
+        },
+        {
+          "word": "99,491.00",
+          "source": [
+            509,
+            415
+          ],
+          "output": [
+            76,
+            397
+          ],
+          "pt": 434.2
+        },
+        {
+          "word": "secretary",
+          "source": [
+            500,
+            593
+          ],
+          "output": [
+            116,
+            481
+          ],
+          "pt": 400.2
+        },
+        {
+          "word": "cheque",
+          "source": [
+            490,
+            664
+          ],
+          "output": [
+            115,
+            570
+          ],
+          "pt": 386.4
+        },
+        {
+          "word": "in",
+          "source": [
+            523,
+            664
+          ],
+          "output": [
+            149,
+            568
+          ],
+          "pt": 385.8
+        },
+        {
+          "word": "mess.",
+          "source": [
+            471,
+            731
+          ],
+          "output": [
+            111,
+            669
+          ],
+          "pt": 365.4
+        },
+        {
+          "word": "mess",
+          "source": [
+            444,
+            593
+          ],
+          "output": [
+            208,
+            590
+          ],
+          "pt": 235.1
+        },
+        {
+          "word": "mess",
+          "source": [
+            198,
+            676
+          ],
+          "output": [
+            188,
+            457
+          ],
+          "pt": 219.4
+        }
+      ]
+    }
+  ]
+}

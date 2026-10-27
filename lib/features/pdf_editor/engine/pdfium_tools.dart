@@ -3,6 +3,17 @@ part of 'pdfium_engine.dart';
 /// Read-only tools on a PDFium session used by the reader and the
 /// converters: structured content, images, rendering, outline, search and
 /// annotation listing.
+/// A page as one image (faithful conversion).
+class PageImage {
+  final Uint8List bytes;
+  final String ext; // jpeg | png
+  final int width, height; // pixels
+  final bool original; // the page's own JPEG, unchanged
+  final Size pageSize; // points
+  final Rect box; // where the image sits on the page (points)
+  const PageImage(this.bytes, this.ext, this.width, this.height, this.original, this.pageSize, {required this.box});
+}
+
 class PdfOutlineItem {
   final String title;
   final int? page; // null when the destination is not a page in this file
@@ -230,6 +241,77 @@ extension PdfiumTools on PdfiumSession {
     } finally {
       _lib.FPDF_ClosePage(page);
     }
+  }
+
+  /// The whole page as one image for the faithful Word mode. When the page
+  /// is nothing but one upright, full-page JPEG photo (a typical scan), the
+  /// original JPEG bytes are returned unchanged: no re-rendering and no
+  /// recompression. Otherwise the page is rendered at [dpi] and encoded as
+  /// JPEG ([quality]) or PNG.
+  PageImage pageImage(int pageIndex, {double dpi = 300, int quality = 92, bool png = false, bool allowOriginal = true}) {
+    final p = _lib;
+    final page = _loadPage(_ref, pageIndex);
+    try {
+      final g = PdfiumSession._geom(page);
+      final size = g.display;
+      if (allowOriginal) {
+        final orig = _soleJpeg(page, g, size);
+        if (orig != null) return orig;
+      }
+      final r = _renderPage(page, dpi / 72);
+      final im = img.Image.fromBytes(width: r.width, height: r.height, bytes: r.rgba.buffer, numChannels: 4, order: img.ChannelOrder.rgba).convert(numChannels: 3);
+      final bytes = png ? img.encodePng(im, level: 6) : img.encodeJpg(im, quality: quality);
+      return PageImage(Uint8List.fromList(bytes), png ? 'png' : 'jpeg', r.width, r.height, false, size, box: Offset.zero & size);
+    } finally {
+      p.FPDF_ClosePage(page);
+    }
+  }
+
+  PageImage? _soleJpeg(FPDF_PAGE page, _Geom g, Size size) {
+    final p = _lib;
+    if (g.rot != 0) return null;
+    final count = p.FPDFPage_CountObjects(page);
+    FPDF_PAGEOBJECT? image;
+    for (var i = 0; i < count; i++) {
+      final o = p.FPDFPage_GetObject(page, i);
+      final type = p.FPDFPageObj_GetType(o);
+      if (type == FPDF_PAGEOBJ_IMAGE) {
+        if (image != null) return null;
+        image = o;
+      } else {
+        // Anything else visible (text, drawings) would be lost.
+        final b = PdfiumSession._objBounds(o, g);
+        if (b.width > 0.5 || b.height > 0.5) return null;
+      }
+    }
+    if (image == null) return null;
+    final b = PdfiumSession._objBounds(image, g);
+    // The photo may be letterboxed on a white page; it must lie on the page.
+    if (b.left < -1 || b.top < -1 || b.right > size.width + 1 || b.bottom > size.height + 1) return null;
+    if (b.width * b.height < size.width * size.height * 0.5) return null;
+    return using((a) {
+      final m = a<FS_MATRIX>();
+      if (p.FPDFPageObj_GetMatrix(image!, m) == 0) return null;
+      if (m.ref.b.abs() > 1e-6 || m.ref.c.abs() > 1e-6 || m.ref.a <= 0 || m.ref.d <= 0) return null;
+      if (p.FPDFImageObj_GetImageFilterCount(image) != 1) return null;
+      final nb = a<Uint8>(64);
+      final n = p.FPDFImageObj_GetImageFilter(image, 0, nb.cast(), 64);
+      if (n <= 1 || String.fromCharCodes(nb.asTypedList(n - 1)) != 'DCTDecode') return null;
+      final md = a<FPDF_IMAGEOBJ_METADATA>();
+      if (p.FPDFImageObj_GetImageMetadata(image, page, md) == 0) return null;
+      if (md.ref.colorspace == FPDF_COLORSPACE_DEVICECMYK) return null;
+      final len = p.FPDFImageObj_GetImageDataRaw(image, nullptr, 0);
+      if (len <= 0) return null;
+      final buf = malloc<Uint8>(len);
+      try {
+        p.FPDFImageObj_GetImageDataRaw(image, buf.cast(), len);
+        final bytes = Uint8List.fromList(buf.asTypedList(len));
+        if (bytes.length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) return null;
+        return PageImage(bytes, 'jpeg', md.ref.width, md.ref.height, true, size, box: b.intersect(Offset.zero & size));
+      } finally {
+        malloc.free(buf);
+      }
+    });
   }
 
   /// Renders an original page to RGBA (for the reader and comparisons).

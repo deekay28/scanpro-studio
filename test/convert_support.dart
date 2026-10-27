@@ -25,3 +25,24 @@ Uint8List? libreOfficeToPdf(Uint8List bytes, String ext) {
 }
 
 bool get hasLibreOffice => Process.runSync('which', ['soffice']).exitCode == 0;
+
+/// Tesseract as a stand-in for ML Kit (which only runs on Android): words
+/// with pixel boxes and confidences. Null when tesseract is not installed.
+List<(String, double, double, double, double, double)>? tesseractWords(Uint8List png) {
+  if (Process.runSync('which', ['tesseract']).exitCode != 0) return null;
+  final dir = Directory.systemTemp.createTempSync('ocr');
+  final f = File('${dir.path}/in.png')..writeAsBytesSync(png);
+  final r = Process.runSync('tesseract', [f.path, 'stdout', '--psm', '3', 'tsv']);
+  if (r.exitCode != 0) throw StateError('tesseract failed: ${r.stderr}');
+  final out = <(String, double, double, double, double, double)>[];
+  for (final line in (r.stdout as String).split('\n').skip(1)) {
+    final c = line.split('\t');
+    if (c.length < 12 || c[0] != '5' || c[11].trim().isEmpty) continue;
+    final l = double.parse(c[6]), t = double.parse(c[7]), w = double.parse(c[8]), h = double.parse(c[9]);
+    out.add((c[11].trim(), l, t, w, h, double.parse(c[10]) / 100));
+  }
+  dir.deleteSync(recursive: true);
+  return out;
+}
+
+bool get hasTesseract => Process.runSync('which', ['tesseract']).exitCode == 0;
