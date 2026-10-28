@@ -17,82 +17,58 @@
   "page_count_match": true,
   "page_size_match": true,
   "docx_pictures": 3,
-  "docx_text_runs": 188,
+  "docx_text_runs": 186,
   "docx_tables": 2,
   "pages": [
     {
       "page": 1,
-      "ssim": 0.6771,
-      "mean_abs_diff": 51.87,
-      "pixels_differing_over_64": 0.2206,
+      "ssim": 0.6781,
+      "mean_abs_diff": 53.13,
+      "pixels_differing_over_64": 0.2226,
       "ocr_words_source": 100,
-      "ocr_words_output": 96,
+      "ocr_words_output": 98,
       "matched_words": 89,
       "word_recall": 0.89,
-      "word_precision": 0.927,
-      "displacement_pt_median": 1.84,
-      "displacement_pt_p90": 5.35,
-      "displacement_pt_max": 29.6,
+      "word_precision": 0.908,
+      "displacement_pt_median": 2.16,
+      "displacement_pt_p90": 5.59,
+      "displacement_pt_max": 274.42,
       "largest_displacements": [
         {
-          "word": "pos",
+          "word": "amount",
           "source": [
-            482,
-            680
+            460,
+            312
           ],
           "output": [
-            511,
-            678
+            206,
+            415
           ],
-          "pt": 29.6
+          "pt": 274.4
         },
         {
-          "word": "through",
+          "word": "hq",
           "source": [
-            437,
-            681
+            260,
+            697
           ],
           "output": [
-            464,
-            679
+            401,
+            732
           ],
-          "pt": 26.3
+          "pt": 145.6
         },
         {
-          "word": "card",
+          "word": "hq",
           "source": [
-            393,
-            678
+            121,
+            677
           ],
           "output": [
-            419,
-            679
+            262,
+            698
           ],
-          "pt": 25.2
-        },
-        {
-          "word": "note",
-          "source": [
-            62,
-            642
-          ],
-          "output": [
-            50,
-            634
-          ],
-          "pt": 14.4
-        },
-        {
-          "word": "mcte",
-          "source": [
-            242,
-            678
-          ],
-          "output": [
-            254,
-            678
-          ],
-          "pt": 12.2
+          "pt": 142.3
         },
         {
           "word": "accommodation",
@@ -107,28 +83,52 @@
           "pt": 12.0
         },
         {
-          "word": "mess",
+          "word": "pos",
           "source": [
-            198,
-            676
+            482,
+            680
           ],
           "output": [
-            207,
+            492,
             678
           ],
-          "pt": 9.2
+          "pt": 10.6
         },
         {
-          "word": "1,",
+          "word": "card",
           "source": [
-            54,
-            657
+            393,
+            678
           ],
           "output": [
-            55,
-            662
+            404,
+            678
           ],
-          "pt": 5.6
+          "pt": 10.1
+        },
+        {
+          "word": "through",
+          "source": [
+            437,
+            681
+          ],
+          "output": [
+            447,
+            680
+          ],
+          "pt": 9.4
+        },
+        {
+          "word": "2.",
+          "source": [
+            53,
+            724
+          ],
+          "output": [
+            53,
+            731
+          ],
+          "pt": 7.2
         }
       ]
     }

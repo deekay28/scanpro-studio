@@ -13,6 +13,7 @@ import '../../pdf/pdf_service.dart';
 import '../../pdf_editor/engine/pdfium_engine.dart' show RasterFormat;
 import '../conversion_jobs.dart';
 import '../conversion_service.dart';
+import 'ocr_review_screen.dart';
 import 'output_preview.dart';
 import 'table_review_screen.dart';
 
@@ -536,8 +537,8 @@ class _ConversionSetupScreenState extends State<ConversionSetupScreen> {
             ...ocrOpts,
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Highlight uncertain words'),
-              subtitle: const Text('Words OCR read with low confidence are highlighted for checking'),
+              title: const Text('Highlight uncertain words (review copy)'),
+              subtitle: const Text('Off: a clean document; uncertain words are listed in "Review OCR words" instead'),
               value: o.markUncertain,
               onChanged: (v) => _set(_with(markUncertain: v)),
             ),
@@ -918,6 +919,8 @@ class _OutputTile extends StatelessWidget {
                     ));
                   case 'open':
                     await openOutput(context, output.path, output.name);
+                  case 'review':
+                    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OcrReviewScreen(docxPath: output.path, name: output.name)));
                   case 'share':
                     await ExportActions.shareBytes(bytes, output.name, mime: mimeFor(output.name));
                   case 'save':
@@ -925,11 +928,12 @@ class _OutputTile extends StatelessWidget {
                     if (r != null && context.mounted) showSnack(context, 'Saved');
                 }
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'preview', child: Text('Preview')),
-                PopupMenuItem(value: 'open', child: Text('Open')),
-                PopupMenuItem(value: 'share', child: Text('Share / open with…')),
-                PopupMenuItem(value: 'save', child: Text('Save to device')),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'preview', child: Text('Preview')),
+                const PopupMenuItem(value: 'open', child: Text('Open')),
+                if (OcrReviewScreen.available(output.path)) const PopupMenuItem(value: 'review', child: Text('Review OCR words')),
+                const PopupMenuItem(value: 'share', child: Text('Share / open with…')),
+                const PopupMenuItem(value: 'save', child: Text('Save to device')),
               ],
             ),
     );

@@ -5,6 +5,7 @@ import 'dart:ui';
 import '../model/doc_model.dart' show xmlEscape;
 import '../ooxml/opc.dart';
 import 'layout_model.dart';
+import 'ocr_review.dart';
 
 const _w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const _r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -33,7 +34,13 @@ const pageMargin = 14.0;
 /// from their lines, tables, shaded bands and graphics: text is real Word
 /// text positioned with exact line heights, spacing, indents and tab stops;
 /// tables are Word tables; graphics are anchored at their page positions.
-Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = '', bool highlightUncertain = true}) {
+///
+/// Words read with low OCR confidence are wrapped in hidden bookmarks
+/// (`_OCR_<n>`) and listed in [review] when given, so they can be checked
+/// and corrected later; they are highlighted only with [highlightUncertain]
+/// (a review copy). Words left out of the text (stamp text, noise) are
+/// listed in [review] too.
+Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = '', bool highlightUncertain = false, List<OcrReviewItem>? review}) {
   final opc = OpcWriter();
   final rels = Rels();
   rels.add('http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', 'styles.xml');
@@ -90,7 +97,10 @@ Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = '', bool highl
           '${anchor(bg, behind: true)}</w:p>');
       continue;
     }
-    final w = _PageWriter(page, highlightUncertain);
+    final w = _PageWriter(page, highlightUncertain, pi + 1, review);
+    for (final (text, box) in page.omitted) {
+      review?.add(OcrReviewItem(id: 0, page: pi + 1, text: text, box: box, omitted: true));
+    }
     final paras = w.build();
     // Graphics are anchored to the first paragraph of the page.
     final anchors = page.graphics.map((g) => anchor(g)).join();
@@ -145,7 +155,8 @@ class _Para {
   final double size;
   double lineHeight; // exact, points
   final String align; // left | center | right
-  final double left, right; // indents from the page edges (points)
+  double left; // indent from the page's left edge (points)
+  final double right; // indent from the page's right edge (points)
   double firstLine = 0; // first line's offset from [left] (multi-line paragraphs)
   final List<(double, String)> tabs; // position from the page's left edge, kind (left/right)
   final List<List<LWord>> segments; // single-line paragraphs with tabs
@@ -160,7 +171,9 @@ class _Para {
 class _PageWriter {
   final LayoutPage page;
   final bool highlight;
-  _PageWriter(this.page, this.highlight);
+  final int pageNo;
+  final List<OcrReviewItem>? review;
+  _PageWriter(this.page, this.highlight, this.pageNo, this.review);
 
   double get pw => page.size.width;
 
@@ -179,6 +192,7 @@ class _PageWriter {
       }
     }
     final paras = _paragraphs(free);
+    _alignColumns(paras);
     // Lines closer together than their natural line height: use the actual
     // pitch for both, so neither pushes the other down.
     for (var i = 0; i + 1 < paras.length; i++) {
@@ -217,6 +231,54 @@ class _PageWriter {
       }
     }
     return out;
+  }
+
+  /// Label/value blocks (consecutive single lines with tab stops, like
+  /// "Name : value"): starts and stops within a few points of each other
+  /// are aligned to one position, so labels, colons and values line up as
+  /// they do in the source instead of drifting with measurement noise.
+  void _alignColumns(List<_Para> paras) {
+    bool tabular(_Para p) => p.lines.length == 1 && p.align == 'left';
+    var i = 0;
+    while (i < paras.length) {
+      if (!tabular(paras[i]) || paras[i].tabs.isEmpty) {
+        i++;
+        continue;
+      }
+      var j = i + 1;
+      while (j < paras.length && tabular(paras[j]) && paras[j].top - paras[j - 1].bottom < paras[j - 1].lineHeight * 1.5) {
+        j++;
+      }
+      final block = paras.sublist(i, j);
+      if (block.length >= 2) {
+        final tol = math.max(5.0, pw * 0.01);
+        final xs = <double>[
+          for (final p in block) ...[p.left, ...p.tabs.map((t) => t.$1)],
+        ]..sort();
+        final clusters = <List<double>>[];
+        for (final x in xs) {
+          if (clusters.isNotEmpty && x - clusters.last.first <= tol) {
+            clusters.last.add(x);
+          } else {
+            clusters.add([x]);
+          }
+        }
+        double snap(double x) {
+          for (final c in clusters) {
+            if (c.length > 1 && x >= c.first - 0.01 && x <= c.last + 0.01) return median(c);
+          }
+          return x;
+        }
+
+        for (final p in block) {
+          p.left = snap(p.left);
+          for (var k = 0; k < p.tabs.length; k++) {
+            p.tabs[k] = (snap(p.tabs[k].$1), p.tabs[k].$2);
+          }
+        }
+      }
+      i = j;
+    }
   }
 
   static String _spacer(double h) =>
@@ -370,7 +432,18 @@ class _PageWriter {
           sb.write(_run(' ', w.underline && words[i - 1].underline ? w : _plain(w), size, noHighlight: true));
         }
       }
-      sb.write(_run(w.text, w, w.size > 0 && (w.size - size).abs() > 0.4 ? halfPoint(w.size) : size, tab: tabBefore && i == 0, tracking: track));
+      final run = _run(w.text, w, w.size > 0 && (w.size - size).abs() > 0.4 ? halfPoint(w.size) : size, tab: tabBefore && i == 0, tracking: track);
+      final rv = review;
+      if (w.uncertain && rv != null) {
+        // A hidden bookmark marks the word for review and correction.
+        final n = rv.where((x) => !x.omitted).length + 1;
+        final id = n;
+        rv.add(OcrReviewItem(id: n, page: pageNo, text: w.text, confidence: w.confidence, context: words.map((x) => x.text).join(' '), box: w.box));
+        final tabRun = run.startsWith('<w:r><w:rPr>') && run.contains('<w:tab/>') ? run.substring(0, run.indexOf('</w:r>') + 6) : '';
+        sb.write('$tabRun<w:bookmarkStart w:id="$id" w:name="_OCR_$n"/>${run.substring(tabRun.length)}<w:bookmarkEnd w:id="$id"/>');
+      } else {
+        sb.write(run);
+      }
     }
     return sb.toString();
   }
@@ -381,7 +454,10 @@ class _PageWriter {
   String _run(String text, LWord w, double size, {bool tab = false, double tracking = 0, bool noHighlight = false}) {
     final pr = StringBuffer();
     final f = xmlEscape(w.font);
-    pr.write('<w:rFonts w:ascii="$f" w:hAnsi="$f" w:cs="$f"/>');
+    // Devanagari is a complex script in Word: it takes the cs font, which
+    // must have the glyphs (Mangal ships with Windows; others substitute).
+    final deva = text.runes.any((r) => r >= 0x900 && r <= 0x97f);
+    pr.write('<w:rFonts w:ascii="$f" w:hAnsi="$f" w:cs="${deva ? 'Mangal' : f}"/>');
     if (w.bold) pr.write('<w:b/><w:bCs/>');
     if (w.italic) pr.write('<w:i/><w:iCs/>');
     if ((w.color & 0xFFFFFF) != 0) pr.write('<w:color w:val="${_hex(w.color)}"/>');
@@ -392,6 +468,7 @@ class _PageWriter {
     final sb = StringBuffer();
     if (tab) sb.write('<w:r><w:rPr>$pr</w:rPr><w:tab/></w:r>');
     if (w.underline) pr.write('<w:u w:val="single"/>');
+    if (deva) pr.write('<w:lang w:bidi="hi-IN"/>'); // last in schema order
     sb.write('<w:r><w:rPr>$pr</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>');
     return sb.toString();
   }

@@ -16,7 +16,9 @@ import '../pdf_editor/engine/pdfium_engine.dart' show PageImage, RasterFormat;
 import 'doc_to_pdf.dart';
 import 'layout/layout_docx.dart';
 import 'layout/layout_model.dart';
+import 'layout/layout_check.dart';
 import 'layout/native_layout.dart';
+import 'layout/ocr_review.dart';
 import 'layout/scan_analysis.dart';
 import 'model/page_content.dart';
 import 'office_conversions.dart';
@@ -102,7 +104,7 @@ class ConversionOptions {
     this.ocrScript = 'latin',
     this.docxMode = DocxMode.automatic,
     this.pageDpi = 300,
-    this.markUncertain = true,
+    this.markUncertain = false,
     this.pptxEditable = false,
     this.sheetPerPage = false,
     this.allTextIfNoTable = true,
@@ -154,7 +156,7 @@ class ConversionOptions {
         ocrScript: j['os'] as String? ?? 'latin',
         docxMode: DocxMode.values.firstWhere((e) => e.name == j['dm'], orElse: () => DocxMode.automatic),
         pageDpi: (j['pd'] as num?)?.toDouble() ?? 300,
-        markUncertain: j['mu'] as bool? ?? true,
+        markUncertain: j['mu'] as bool? ?? false,
         pptxEditable: j['pe'] as bool? ?? false,
         sheetPerPage: j['spp'] as bool? ?? false,
         allTextIfNoTable: j['at'] as bool? ?? true,
@@ -422,7 +424,11 @@ class ConversionService {
         continue;
       }
       if (!c.scanned) {
-        out.add(await compute(_work, ('nativeLayout', [c])) as LayoutPage);
+        final page = await compute(_work, ('nativeLayout', [c])) as LayoutPage;
+        for (final pr in checkLayout(page).problems) {
+          warnings.add('Page ${pi + 1}: check the layout: $pr.');
+        }
+        out.add(page);
         rebuiltDigital++;
         continue;
       }
@@ -445,21 +451,24 @@ class ConversionService {
       // again region by region, enlarged.
       if (page.unread.isNotEmpty) {
         progress(k / pages.length * 0.9, 'Reading ${page.unread.length} missed area(s) on $label…');
-        final more = await _readRegions(prep, page.unread, words, o.ocrScript, token);
+        final more = await _readRegions(prep, page.unread, o.ocrScript, token);
         if (more.isNotEmpty) page = await compute(_work, ('scanLayout', [prep, [...words, ...more], c.size])) as LayoutPage;
       }
       for (final w in page.warnings) {
         warnings.add('Page ${pi + 1}: $w');
       }
       final kinds = page.graphics.map((g) => g.kind).toList();
-      warnings.add('Page ${pi + 1} (scan) rebuilt as editable text (OCR): ${page.lines.length} text line(s), ${page.tables.length} table(s), '
-          '${page.shades.length} shaded band(s), ${kinds.length} picture(s) kept from the scan'
-          '${kinds.isEmpty ? '' : ' (${kinds.map((k) => k.name).join(', ')})'}. Fonts are estimated from the scan (Arial); bold text is detected from stroke width and may be missed.');
+      final cov = checkLayout(page);
+      warnings.add('Page ${pi + 1} (scan) rebuilt as editable text (OCR): ${cov.summary}'
+          '${kinds.isEmpty ? '' : ' (pictures: ${kinds.map((k) => _kindName(k)).join(', ')})'}. Fonts are estimated from the scan (Arial); bold text is detected from stroke width and may be missed.');
+      for (final pr in cov.problems) {
+        warnings.add('Page ${pi + 1}: check the layout: $pr.');
+      }
       out.add(page);
     }
     token.check();
     progress(0.92, 'Writing the Word file…');
-    final docx = await compute(_work, ('layoutDocx', [out, base, o.markUncertain])) as Uint8List;
+    final (docx, reviewJson, toCheck) = await compute(_work, ('layoutDocx', [out, base, o.markUncertain])) as (Uint8List, String, int);
     if (asImage > 0) {
       warnings.add('$asImage page(s) were kept as page images (${o.docxMode == DocxMode.automatic ? 'Automatic: scanned pages' : 'Faithful layout'}). '
           'They look like the original, but their text is a picture and cannot be edited in Word. Choose "Editable document" to rebuild them as text.');
@@ -469,11 +478,19 @@ class ConversionService {
       warnings.add('$rebuiltDigital digital page(s) rebuilt with their own text, fonts, tables and images at their original positions. '
           'Fonts that are not installed where the file is opened are replaced by similar ones.');
     }
-    await write('$base.docx', docx);
+    final written = await write('$base.docx', docx);
+    if (toCheck > 0 || reviewJson.contains('"omitted":true')) {
+      // Kept beside the document (not an output): the review screen lists
+      // these words and writes corrections into the document.
+      await File(reviewPathFor(written.path)).writeAsString(reviewJson);
+      if (toCheck > 0) {
+        warnings.add('$toCheck word(s) were read with low OCR confidence. They are not highlighted in the document; use "Review OCR words" in the file\'s menu to check and correct them.');
+      }
+    }
   }
 
   /// OCR on parts of a prepared scan; words come back in the scan's pixels.
-  Future<List<PdfWord>> _readRegions(PreparedScan prep, List<Rect> regions, List<PdfWord> known, String script, CancelToken token) async {
+  Future<List<PdfWord>> _readRegions(PreparedScan prep, List<Rect> regions, String script, CancelToken token) async {
     final full = prep.rectified;
     final out = <PdfWord>[];
     for (final r in regions) {
@@ -481,17 +498,19 @@ class ConversionService {
       final x0 = r.left.floor().clamp(0, full.width - 1), y0 = r.top.floor().clamp(0, full.height - 1);
       final cw = (r.right.ceil() - x0).clamp(1, full.width - x0), ch = (r.bottom.ceil() - y0).clamp(1, full.height - y0);
       final k = ch < 60 ? 2 : 1; // small text reads better enlarged
-      final png = await compute(_cropPng, (full.data, full.width, x0, y0, cw, ch, k));
-      final words = await ocr!(png, cw * k, ch * k, script);
+      final m = (ch / 2).round(); // and with a white margin around it
+      final png = await compute(_cropPng, (full.data, full.width, x0, y0, cw, ch, k, m));
+      final words = await ocr!(png, (cw + 2 * m) * k, (ch + 2 * m) * k, script);
       for (final wd in words) {
         final b = wd.box;
-        final box = Rect.fromLTRB(x0 + b.left / k, y0 + b.top / k, x0 + b.right / k, y0 + b.bottom / k);
-        // Region margins can catch the edge of a word that was already read.
-        final seen = [...known, ...out].any((o) {
-          final i = o.box.intersect(box);
-          return i.width > 0 && i.height > 0 && i.width * i.height > box.width * box.height * 0.4;
-        });
-        if (!seen && wd.text.trim().isNotEmpty) out.add(PdfWord(wd.text, box, confidence: wd.confidence));
+        final box = Rect.fromLTRB(x0 + b.left / k - m, y0 + b.top / k - m, x0 + b.right / k - m, y0 + b.bottom / k - m);
+        // Words read twice are resolved after word boxes are taken from the
+        // ink (InkGeometry keeps the more confident reading).
+        // Line ids of each region are kept apart from the first pass's.
+        // Regions can be marks rather than text: only words read with
+        // confidence that contain a letter or digit are taken.
+        final real = (wd.confidence ?? 0.8) >= 0.6 && RegExp(r'[A-Za-z0-9\u0900-\u097F]').hasMatch(wd.text);
+        if (real) out.add(PdfWord(wd.text, box, confidence: wd.confidence, line: wd.line == null ? null : (regions.indexOf(r) + 1) * 100000 + wd.line!));
       }
     }
     return out;
@@ -616,7 +635,10 @@ Object _work((String, List<Object?>) msg) {
     case 'text':
       return DocPdfRenderer(a[1] as Uint8List).render(textToDoc(utf8.decode(a[0] as Uint8List, allowMalformed: true), title: a[2] as String));
     case 'layoutDocx':
-      return writeLayoutDocx((a[0] as List).cast<LayoutPage>(), title: a[1] as String, highlightUncertain: a[2] as bool);
+      final pages = (a[0] as List).cast<LayoutPage>();
+      final review = <OcrReviewItem>[];
+      final docx = writeLayoutDocx(pages, title: a[1] as String, highlightUncertain: a[2] as bool, review: review);
+      return (docx, encodeReview(review, [for (final p in pages) p.size]), review.where((x) => !x.omitted).length);
     case 'prepareScan':
       return prepareScan(a[0] as Uint8List, a[1] as int, a[2] as int, a[3] as Rect);
     case 'scanLayout':
@@ -658,17 +680,28 @@ Object _work((String, List<Object?>) msg) {
   }
 }
 
-/// A region of an RGB image as PNG, enlarged [k] times.
-Uint8List _cropPng((Uint8List, int, int, int, int, int, int) a) {
-  final (data, width, x0, y0, cw, ch, k) = a;
-  var im = img.Image(width: cw, height: ch, numChannels: 3);
+String _kindName(GraphicKind k) => switch (k) {
+      GraphicKind.qrCode => 'QR code',
+      GraphicKind.stamp => 'stamp or seal',
+      GraphicKind.signature => 'signature',
+      GraphicKind.photo => 'photo',
+      GraphicKind.logo => 'logo',
+      GraphicKind.pageImage => 'page image',
+      GraphicKind.graphic => 'graphic',
+    };
+
+/// A region of an RGB image as PNG with a white margin of [m] pixels,
+/// enlarged [k] times.
+Uint8List _cropPng((Uint8List, int, int, int, int, int, int, int) a) {
+  final (data, width, x0, y0, cw, ch, k, m) = a;
+  var im = img.Image(width: cw + 2 * m, height: ch + 2 * m, numChannels: 3)..clear(img.ColorRgb8(255, 255, 255));
   for (var y = 0; y < ch; y++) {
     for (var x = 0; x < cw; x++) {
       final j = ((y0 + y) * width + x0 + x) * 3;
-      im.setPixelRgb(x, y, data[j], data[j + 1], data[j + 2]);
+      im.setPixelRgb(x + m, y + m, data[j], data[j + 1], data[j + 2]);
     }
   }
-  if (k > 1) im = img.copyResize(im, width: cw * k, height: ch * k, interpolation: img.Interpolation.cubic);
+  if (k > 1) im = img.copyResize(im, width: im.width * k, height: im.height * k, interpolation: img.Interpolation.cubic);
   return Uint8List.fromList(img.encodePng(im, level: 1));
 }
 

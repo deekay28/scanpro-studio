@@ -1,0 +1,136 @@
+{
+  "label": "messbill_ocr_pad0.5",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.276,
+      841.89
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 3,
+  "docx_text_runs": 188,
+  "docx_tables": 2,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.6713,
+      "mean_abs_diff": 53.16,
+      "pixels_differing_over_64": 0.2229,
+      "ocr_words_source": 100,
+      "ocr_words_output": 98,
+      "matched_words": 92,
+      "word_recall": 0.92,
+      "word_precision": 0.939,
+      "displacement_pt_median": 3.05,
+      "displacement_pt_p90": 7.42,
+      "displacement_pt_max": 24.12,
+      "largest_displacements": [
+        {
+          "word": "pos",
+          "source": [
+            482,
+            680
+          ],
+          "output": [
+            506,
+            680
+          ],
+          "pt": 24.1
+        },
+        {
+          "word": "through",
+          "source": [
+            437,
+            681
+          ],
+          "output": [
+            459,
+            681
+          ],
+          "pt": 21.6
+        },
+        {
+          "word": "card",
+          "source": [
+            393,
+            678
+          ],
+          "output": [
+            415,
+            680
+          ],
+          "pt": 21.3
+        },
+        {
+          "word": "accommodation",
+          "source": [
+            241,
+            365
+          ],
+          "output": [
+            229,
+            364
+          ],
+          "pt": 12.0
+        },
+        {
+          "word": "favour",
+          "source": [
+            67,
+            675
+          ],
+          "output": [
+            77,
+            680
+          ],
+          "pt": 11.3
+        },
+        {
+          "word": "mcte",
+          "source": [
+            242,
+            678
+          ],
+          "output": [
+            251,
+            680
+          ],
+          "pt": 9.4
+        },
+        {
+          "word": "2.",
+          "source": [
+            53,
+            724
+          ],
+          "output": [
+            53,
+            733
+          ],
+          "pt": 9.4
+        },
+        {
+          "word": "1,",
+          "source": [
+            54,
+            657
+          ],
+          "output": [
+            55,
+            665
+          ],
+          "pt": 7.7
+        }
+      ]
+    }
+  ]
+}

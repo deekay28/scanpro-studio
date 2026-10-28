@@ -1,0 +1,136 @@
+{
+  "label": "messbill_ocr_split",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.276,
+      841.89
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 3,
+  "docx_text_runs": 188,
+  "docx_tables": 2,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.6753,
+      "mean_abs_diff": 53.27,
+      "pixels_differing_over_64": 0.2232,
+      "ocr_words_source": 100,
+      "ocr_words_output": 94,
+      "matched_words": 86,
+      "word_recall": 0.86,
+      "word_precision": 0.915,
+      "displacement_pt_median": 2.55,
+      "displacement_pt_p90": 11.97,
+      "displacement_pt_max": 171.74,
+      "largest_displacements": [
+        {
+          "word": "amount",
+          "source": [
+            460,
+            312
+          ],
+          "output": [
+            288,
+            315
+          ],
+          "pt": 171.7
+        },
+        {
+          "word": "off",
+          "source": [
+            315,
+            416
+          ],
+          "output": [
+            472,
+            416
+          ],
+          "pt": 156.6
+        },
+        {
+          "word": "type",
+          "source": [
+            290,
+            318
+          ],
+          "output": [
+            236,
+            317
+          ],
+          "pt": 53.7
+        },
+        {
+          "word": "payable",
+          "source": [
+            517,
+            315
+          ],
+          "output": [
+            487,
+            315
+          ],
+          "pt": 29.2
+        },
+        {
+          "word": "rounded",
+          "source": [
+            270,
+            416
+          ],
+          "output": [
+            298,
+            417
+          ],
+          "pt": 28.1
+        },
+        {
+          "word": "pos",
+          "source": [
+            482,
+            680
+          ],
+          "output": [
+            506,
+            678
+          ],
+          "pt": 24.2
+        },
+        {
+          "word": "through",
+          "source": [
+            437,
+            681
+          ],
+          "output": [
+            459,
+            679
+          ],
+          "pt": 21.6
+        },
+        {
+          "word": "card",
+          "source": [
+            393,
+            678
+          ],
+          "output": [
+            415,
+            678
+          ],
+          "pt": 21.2
+        }
+      ]
+    }
+  ]
+}

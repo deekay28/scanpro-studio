@@ -8,6 +8,7 @@ import '../../../imaging/image_ops.dart';
 import '../../../imaging/perspective.dart';
 import '../model/page_content.dart' show PdfWord;
 import 'layout_model.dart';
+import 'ink_geometry.dart';
 import 'table_grid.dart';
 
 /// A scanned or photographed page prepared for analysis: the paper is found
@@ -192,8 +193,8 @@ class _Comp {
 
 /// Builds an editable layout from a prepared scan and the OCR words found in
 /// [PreparedScan.png] (pixel coordinates of the rectified image).
-LayoutPage buildScanLayout(PreparedScan s, List<PdfWord> ocrWords, Size pageSize, {bool markUncertain = true, void Function(String name, Uint8List png)? debug}) {
-  final a = _ScanAnalyzer(s, ocrWords, pageSize, markUncertain)..debug = debug;
+LayoutPage buildScanLayout(PreparedScan s, List<PdfWord> ocrWords, Size pageSize, {void Function(String name, Uint8List png)? debug}) {
+  final a = _ScanAnalyzer(s, ocrWords, pageSize)..debug = debug;
   return a.run();
 }
 
@@ -201,8 +202,7 @@ class _ScanAnalyzer {
   final PreparedScan s;
   final List<PdfWord> ocr;
   final Size pageSize;
-  final bool markUncertain;
-  _ScanAnalyzer(this.s, this.ocr, this.pageSize, this.markUncertain);
+  _ScanAnalyzer(this.s, this.ocr, this.pageSize);
 
   late final Rgb im = s.rectified;
   late final int w = im.width, h = im.height;
@@ -215,6 +215,8 @@ class _ScanAnalyzer {
   late Uint8List colored; // 1 = saturated (coloured) ink
   late Uint8List faint; // 1 = any mark clearly darker than paper (faint stamps)
   final warnings = <String>[];
+  List<PdfWord> droppedWords = const [];
+  final rejected = <Rect>[]; // picture candidates that were text
   void Function(String name, Uint8List png)? debug;
 
   void _dump(String name, Uint8List mask) {
@@ -257,20 +259,27 @@ class _ScanAnalyzer {
     debug?.call('rectified', s.png);
     // Ruling lines are searched in the ink outside recognised words, so the
     // strokes of letters are never taken for table borders.
+    // Word boxes from the ink, not from the OCR engine (see InkGeometry).
+    final geo = InkGeometry(ink, norm, colored, w, h, log: debug == null ? null : (m) => debug!('geo $m', Uint8List(0)));
+    final words = geo.snap(<PdfWord>[
+      for (final o in ocr)
+        if (_cleanWord(o) case final c?) _trimToInk(o, c),
+    ]);
+    droppedWords = geo.dropped;
+    if (debug != null) {
+      debug!('dropped ${droppedWords.map((x) => '${x.text}@${x.box.left.round()},${x.box.top.round()}').join(' ')}', Uint8List(0));
+      debug!('words ${words.map((x) => '${x.text}@${x.box.left.round()},${x.box.top.round()},${x.box.width.round()}x${x.box.height.round()}').join(' ')}', Uint8List(0));
+    }
     final lineInk = Uint8List(w * h);
     for (var i = 0; i < w * h; i++) {
       if (norm[i] < 185 || ink[i] == 1) lineInk[i] = 1;
     }
-    for (final o in ocr) {
+    for (final o in words) {
       final t = o.text.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
       if (t.isEmpty || (o.confidence ?? 0.8) < 0.3) continue;
-      _clear(lineInk, o.box.deflate(1));
+      _clear(lineInk, o.box);
     }
     final rules = _rules(lineInk);
-    final words = <PdfWord>[
-      for (final o in ocr)
-        if (_cleanWord(o) case final c?) _trimToInk(o, c),
-    ];
     // Shaded bands first, so they are not taken for graphics.
     final preRows = _rows(_styleWords(words, rules));
     final shadeBoxes = _shades(preRows);
@@ -340,11 +349,11 @@ class _ScanAnalyzer {
     }
     _harmoniseSizes(page);
     page.unread = _unread(words, graphicRects);
-    final uncertain = [for (final l in page.lines) ...l.words.where((x) => x.uncertain)].length +
-        [for (final t in page.tables) for (final c in t.cells) for (final l in c.lines) ...l.words.where((x) => x.uncertain)].length;
-    if (uncertain > 0) {
-      warnings.add('$uncertain word(s) were recognised with low confidence${markUncertain ? ' and are highlighted' : ''}; check them against the original.');
-    }
+    page.omitted = [
+      for (final d in droppedWords)
+        if (d.text.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F]'), '').length >= 2) (d.text, mapRect(d.box)),
+    ];
+    // Uncertain words are reported by the DOCX writer (review list).
     return page;
   }
 
@@ -667,6 +676,21 @@ class _ScanAnalyzer {
         if (i.width > 0 && i.height > 0) covered += i.width * i.height;
       }
       final textual = covered > r.width * r.height * 0.45;
+      // A region that contains whole lines of printed text is text (with
+      // perhaps a background or a smudge), never a picture: one region, one
+      // rendering strategy.
+      final qrLike = density > 0.3 && aspect > 0.8 && aspect < 1.25;
+      var textChars = 0;
+      for (final wd in words) {
+        if (!_looksLikeText(wd) || (wd.confidence ?? 0.8) < 0.5) continue;
+        if (_overlapShare(wd.box, r) < 0.8) continue;
+        textChars += wd.text.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F]'), '').length;
+      }
+      if (textChars >= 8 && !qrLike) {
+        rejected.add(r);
+        if (debug != null) debug!('comp rejected: contains $textChars text characters', Uint8List(0));
+        continue;
+      }
       if (debug != null && r.width > w * 0.03 && r.height > w * 0.03) debug!('comp ${r.left.round()},${r.top.round()} ${r.width.round()}x${r.height.round()} dens=${density.toStringAsFixed(3)} col=${colouredShare.toStringAsFixed(2)} textual=$textual', Uint8List(0));
       if (textual && !(density > 0.3 && aspect > 0.8 && aspect < 1.25)) continue;
       GraphicKind kind;
@@ -676,6 +700,9 @@ class _ScanAnalyzer {
         kind = density < 0.12 && aspect > 1.4 ? GraphicKind.signature : GraphicKind.stamp;
       } else if (density < 0.02) {
         continue; // faint specks
+      } else if (density < 0.15) {
+        // Sparse line art on paper: a seal, a stamp, a signature.
+        kind = GraphicKind.stamp;
       } else {
         kind = GraphicKind.graphic;
       }
@@ -720,7 +747,7 @@ class _ScanAnalyzer {
     final alnum = t.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F₹$€£%]'), '').length;
     if (t == '|' || (alnum == 0 && conf < 0.75 && t != ':' && t != '-')) return null;
     if (alnum <= 2 && conf < 0.35) return null;
-    return PdfWord(t, box, confidence: o.confidence);
+    return PdfWord(t, box, confidence: o.confidence, line: o.line);
   }
 
   /// After stray border characters were removed from a word, its box is
@@ -763,7 +790,7 @@ class _ScanAnalyzer {
     if ((o.endsWith(']') || o.endsWith('|')) && runs.length > 1 && bar(runs[last]) && runs[last].$1 - runs[last - 1].$2 > typical * 1.5) last--;
     final left = x0 + runs[first].$1.toDouble(), right = x0 + runs[last].$2.toDouble();
     if (right - left < b.width * 0.2) return cleaned;
-    return PdfWord(cleaned.text, Rect.fromLTRB(left, b.top, right, b.bottom), confidence: cleaned.confidence);
+    return PdfWord(cleaned.text, Rect.fromLTRB(left, b.top, right, b.bottom), confidence: cleaned.confidence, line: cleaned.line);
   }
 
   /// A recognised word that is real printed text (not OCR noise on a
@@ -854,8 +881,11 @@ class _ScanAnalyzer {
           final v = norm[sy * w + sx] < 150 ? 0 : 255;
           out.setPixelRgb(x, y, v, v, v);
         } else if (kind == GraphicKind.stamp || kind == GraphicKind.signature) {
-          // Ink on white: the paper around it becomes white.
-          out.setPixelRgb(x, y, d[j], d[j + 1], d[j + 2]);
+          // Ink on white: paper-light pixels fade to white, ink (even pale
+          // stamp ink) keeps its colour.
+          final t = clampD((norm[sy * w + sx] - 228) / 18, 0, 1);
+          int blend(int c) => (c + (255 - c) * t).round();
+          out.setPixelRgb(x, y, blend(d[j]), blend(d[j + 1]), blend(d[j + 2]));
         } else {
           // Pictures and logos keep their own colours.
           final rd = im.data;
@@ -873,13 +903,14 @@ class _ScanAnalyzer {
   List<LWordPx> _styleWords(List<PdfWord> words, List<_Rule> rules) {
     final strokes = <double>[];
     final out = <LWordPx>[];
+    for (final wd in words) {
+      out.add(LWordPx(wd, _strokeWidth(wd.box)));
+    }
     // Stroke width relative to the font size (fitted from the word's width,
     // which unlike its height doesn't depend on capitals or descenders).
     double rel(LWordPx x) => x.stroke / math.max(1, _sizePx(x.word));
-    for (final wd in words) {
-      final x = LWordPx(wd, _strokeWidth(wd.box));
-      out.add(x);
-      if (x.stroke > 0 && wd.text.length >= 2) strokes.add(rel(x));
+    for (final x in out) {
+      if (x.stroke > 0 && x.word.text.length >= 2) strokes.add(rel(x));
     }
     final base = median(strokes);
     if (debug != null) {
@@ -964,36 +995,24 @@ class _ScanAnalyzer {
     return byWidth <= 0 ? byHeight : clampD(byWidth, byHeight * 0.6, byHeight * 1.6);
   }
 
-  /// Within a run of words (a segment), a clear majority decides bold, so
-  /// noisy stroke estimates don't make lines partly bold; genuinely mixed
-  /// runs keep their per-word weights.
+  /// One weight for a run of words (a segment), so noisy stroke estimates
+  /// don't make lines partly bold.
   static void _smoothBold(List<LWordPx> words) {
     if (words.length < 2) return;
-    var bold = 0, all = 0;
+    // The phrase's average stroke (weighted by letters) decides; only in
+    // between does the per-word majority.
+    var all = 0, bold = 0;
+    var sum = 0.0;
     for (final x in words) {
       final n = x.word.text.length;
       all += n;
+      sum += x.weight * n;
       if (x.bold) bold += n;
     }
-    final f = bold / math.max(1, all);
-    if (f >= 0.65) {
-      for (final x in words) {
-        x.bold = true;
-      }
-    } else if (f <= 0.35) {
-      for (final x in words) {
-        x.bold = false;
-      }
-    } else {
-      // Mixed: one weight for the whole phrase, from its average stroke.
-      var sum = 0.0;
-      for (final x in words) {
-        sum += x.weight * x.word.text.length;
-      }
-      final b = sum / math.max(1, all) > 1.15;
-      for (final x in words) {
-        x.bold = b;
-      }
+    final avg = sum / math.max(1, all);
+    final b = avg > 1.17 ? true : (avg < 1.05 ? false : bold * 2 >= all);
+    for (final x in words) {
+      x.bold = b;
     }
   }
 
@@ -1201,7 +1220,7 @@ class _ScanAnalyzer {
       final b = Rect.fromLTRB(r.box.left, top, r.box.right, top + lh);
       final probe = w * 0.03;
       final left = _behind(Rect.fromLTRB(b.left - probe, b.top + lh * 0.2, b.left - 3, b.bottom - lh * 0.2));
-      if (debug != null && r.words.length > 2) {
+      if (debug != null) {
         debug!('shade ${r.words.map((x) => x.word.text).take(3).join(' ')} L=$left R=${_behind(Rect.fromLTRB(b.right + 3, b.top + lh * 0.2, b.right + probe, b.bottom - lh * 0.2))} A=${_paperLevel(Rect.fromLTRB(b.left, b.top - lh * 3.2, b.right, b.top - lh * 2.2))} B=${_paperLevel(Rect.fromLTRB(b.left, b.bottom + lh * 2.2, b.right, b.bottom + lh * 3.2))}', Uint8List(0));
       }
       final right = _behind(Rect.fromLTRB(b.right + 3, b.top + lh * 0.2, b.right + probe, b.bottom - lh * 0.2));
@@ -1248,11 +1267,9 @@ class _ScanAnalyzer {
     if (words.isEmpty) return const [];
     final hs = words.map((x) => x.box.height).toList()..sort();
     final th = hs[hs.length ~/ 2];
-    final m = Uint8List.fromList(ink);
-    final lm = lineMask;
-    for (var i = 0; i < w * h; i++) {
-      if (lm != null && lm[i] == 1) m[i] = 0;
-    }
+    // Long strokes only: the traced ruling lines can include the stems of
+    // unread capitals.
+    final m = InkGeometry(ink, norm, colored, w, h).withoutStrokes(math.max(12, (th * 2.6).round()));
     for (final wd in words) {
       _clear(m, wd.box.inflate(3));
     }
@@ -1391,9 +1408,16 @@ class _ScanAnalyzer {
       }
     }
     var byHeight = median(hs);
-    // A box much taller than its width suggests was stretched (an underline
-    // or a border below the word): its height is not used.
-    if (byWidth > 0 && byHeight > byWidth * 1.3) byHeight = byWidth;
+    // A box much taller than its width suggests was stretched (a smudge
+    // below the word): its height is not used. Narrow text ("1", "I") is
+    // measured by its height, as its ink width says little about its size.
+    if (byWidth > 0 && byHeight > byWidth * 1.3 && chars >= 3) byHeight = byWidth;
+    if (chars <= 2 && byHeight > 0) {
+      for (final wd in l.words) {
+        wd.size = byHeight;
+      }
+      return;
+    }
     var size = byWidth > 0 ? byWidth : byHeight;
     // Short text measures its width poorly: trust its height more.
     // Long text measures its width reliably (wide, heavy faces included).

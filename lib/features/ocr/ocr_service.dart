@@ -75,15 +75,17 @@ class OcrService {
   /// Words with their own boxes and confidences (ML Kit "elements"), for
   /// layout reconstruction. Falls back to splitting a line evenly when the
   /// engine returns no elements for it.
-  Future<List<({String text, double left, double top, double right, double bottom, double? confidence})>> recognizeWords(String absPath, {required String script}) async {
+  Future<List<({String text, double left, double top, double right, double bottom, double? confidence, int line})>> recognizeWords(String absPath, {required String script}) async {
     final r = await _recognizer(script).processImage(InputImage.fromFilePath(absPath));
-    final out = <({String text, double left, double top, double right, double bottom, double? confidence})>[];
+    final out = <({String text, double left, double top, double right, double bottom, double? confidence, int line})>[];
+    var line = 0;
     for (final b in r.blocks) {
       for (final l in b.lines) {
+        line++;
         if (l.elements.isNotEmpty) {
           for (final e in l.elements) {
             final box = e.boundingBox;
-            out.add((text: e.text, left: box.left, top: box.top, right: box.right, bottom: box.bottom, confidence: e.confidence ?? _confidenceOf(l)));
+            out.add((text: e.text, left: box.left, top: box.top, right: box.right, bottom: box.bottom, confidence: e.confidence ?? _confidenceOf(l), line: line));
           }
           continue;
         }
@@ -94,7 +96,7 @@ class OcrService {
         final per = (box.right - box.left) / (chars == 0 ? 1 : chars);
         var x = box.left;
         for (final w in parts) {
-          out.add((text: w, left: x, top: box.top, right: x + per * w.length, bottom: box.bottom, confidence: _confidenceOf(l)));
+          out.add((text: w, left: x, top: box.top, right: x + per * w.length, bottom: box.bottom, confidence: _confidenceOf(l), line: line));
           x += per * (w.length + 1);
         }
       }

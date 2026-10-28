@@ -142,9 +142,9 @@
     },
     {
       "page": 2,
-      "ssim": 0.9909,
-      "mean_abs_diff": 0.77,
-      "pixels_differing_over_64": 0.0044,
+      "ssim": 0.9907,
+      "mean_abs_diff": 0.78,
+      "pixels_differing_over_64": 0.0043,
       "ocr_words_source": 18,
       "ocr_words_output": 19,
       "matched_words": 16,
@@ -179,18 +179,6 @@
           "pt": 1.8
         },
         {
-          "word": "15/03/2024",
-          "source": [
-            248,
-            133
-          ],
-          "output": [
-            249,
-            133
-          ],
-          "pt": 1.1
-        },
-        {
           "word": "expenses",
           "source": [
             98,
@@ -211,6 +199,18 @@
           "output": [
             76,
             116
+          ],
+          "pt": 1.1
+        },
+        {
+          "word": "toner",
+          "source": [
+            74,
+            133
+          ],
+          "output": [
+            75,
+            133
           ],
           "pt": 1.1
         },

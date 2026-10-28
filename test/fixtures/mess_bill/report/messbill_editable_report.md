@@ -2,12 +2,12 @@
 
 - Pages: source 1, output 1 (match)
 - Page sizes (pt): source [(595.276, 841.89)], output [(595.304, 841.89)] (match)
-- DOCX: 3 picture(s), 188 text run(s), 2 table(s)
+- DOCX: 3 picture(s), 186 text run(s), 2 table(s)
 
 ## Page 1
 
-- SSIM 0.6771, mean absolute difference 51.87, pixels differing by >25%: 22.1%
-- OCR words: source 100, output 96, matched 89 (recall 0.89, precision 0.927)
-- Word displacement (pt): median 1.84, 90th percentile 5.35, max 29.6
-- Largest displacements: "pos" 29.6 pt, "through" 26.3 pt, "card" 25.2 pt, "note" 14.4 pt, "mcte" 12.2 pt, "accommodation" 12.0 pt, "mess" 9.2 pt, "1," 5.6 pt
+- SSIM 0.6781, mean absolute difference 53.13, pixels differing by >25%: 22.3%
+- OCR words: source 100, output 98, matched 89 (recall 0.89, precision 0.908)
+- Word displacement (pt): median 2.16, 90th percentile 5.59, max 274.42
+- Largest displacements: "amount" 274.4 pt, "hq" 145.6 pt, "hq" 142.3 pt, "accommodation" 12.0 pt, "pos" 10.6 pt, "card" 10.1 pt, "through" 9.4 pt, "2." 7.2 pt
 - Images: `messbill_editable_p1_side_by_side.png`, `messbill_editable_p1_heatmap.png`

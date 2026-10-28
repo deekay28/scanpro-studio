@@ -14,8 +14,9 @@ class PdfWord {
   final int color; // ARGB
   final String font;
   final double? confidence; // OCR confidence (0..1); null for native text
+  final int? line; // OCR: the engine's text line this word belongs to
 
-  const PdfWord(this.text, this.box, {this.size = 10, this.bold = false, this.italic = false, this.color = 0xFF000000, this.font = '', this.confidence});
+  const PdfWord(this.text, this.box, {this.size = 10, this.bold = false, this.italic = false, this.color = 0xFF000000, this.font = '', this.confidence, this.line});
 
   bool get uncertain => confidence != null && confidence! < 0.6;
 }

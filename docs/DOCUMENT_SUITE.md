@@ -24,7 +24,7 @@ Legend: ✅ complete · 🟡 partial (limits described) · ⏳ not implemented
 ### Conversion Centre
 | Feature | Status | Notes |
 |---|---|---|
-| PDF → Word (DOCX): **Faithful layout** (page-sized original image per page), **Editable document** (text, tables, shaded bands and pictures rebuilt at their original positions; scans straightened and read with OCR, seals/stamps/signatures/QR codes kept as pictures) and **Automatic** (per page) | ✅ | See [PDF_TO_WORD_LAYOUT.md](PDF_TO_WORD_LAYOUT.md): diagnosis, stages, measured visual-comparison results and limits. Uncertain OCR words are highlighted |
+| PDF → Word (DOCX): **Faithful layout** (page-sized original image per page), **Editable document** (text, tables, shaded bands and pictures rebuilt at their original positions; scans straightened and read with OCR, seals/stamps/signatures/QR codes kept as pictures) and **Automatic** (per page) | ✅ | See [PDF_TO_WORD_LAYOUT.md](PDF_TO_WORD_LAYOUT.md): diagnosis, stages, measured visual-comparison results and limits. Uncertain OCR words are listed in **Review OCR words** (not highlighted) and can be corrected |
 | PDF → Excel (XLSX): ruled and borderless tables, typed numbers/dates/currency, one sheet per table or per page, source note per sheet | ✅ | Uncertain cells keep their original text and are highlighted. If no table is found, lines can be exported instead |
 | Table **review before export**: edit cells, delete/merge/split/insert columns, delete rows, set the header row; export XLSX or CSV | ✅ | PDF → Excel/CSV and PowerPoint → Excel, single file |
 | PDF → PowerPoint: **visual** (page images, labelled) and **editable** (text boxes + pictures) | ✅ | Scanned pages become labelled picture slides |

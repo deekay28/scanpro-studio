@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:archive/archive.dart';
+import 'package:scanpro_studio/features/convert/model/page_content.dart';
 
 /// Writes [bytes] to a temp file and opens it with python-docx / openpyxl /
 /// python-pptx (independent readers). Returns their JSON summary.
@@ -47,6 +49,24 @@ List<(String, double, double, double, double, double)>? tesseractWords(Uint8List
   }
   dir.deleteSync(recursive: true);
   return out;
+}
+
+/// Tesseract words as an OCR engine reports them: text, box, confidence and
+/// the engine's text line.
+List<PdfWord>? tesseractPdfWords(Uint8List png, {String lang = 'eng'}) {
+  if (!hasTesseract) return null;
+  final dir = Directory.systemTemp.createTempSync('ocr');
+  final f = File('${dir.path}/in.png')..writeAsBytesSync(png);
+  final r = Process.runSync('tesseract', [f.path, 'stdout', '-l', lang, '--psm', '3', 'tsv']);
+  dir.deleteSync(recursive: true);
+  if (r.exitCode != 0) throw StateError('tesseract failed: ${r.stderr}');
+  final ids = <String, int>{};
+  return [
+    for (final line in (r.stdout as String).split('\n').skip(1))
+      if (line.split('\t') case final c when c.length >= 12 && c[0] == '5' && c[11].trim().isNotEmpty)
+        PdfWord(c[11].trim(), Rect.fromLTWH(double.parse(c[6]), double.parse(c[7]), double.parse(c[8]), double.parse(c[9])),
+            confidence: double.parse(c[10]) / 100, line: ids.putIfAbsent('${c[1]}-${c[2]}-${c[3]}-${c[4]}', () => ids.length)),
+  ];
 }
 
 bool get hasTesseract => Process.runSync('which', ['tesseract']).exitCode == 0;

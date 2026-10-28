@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:scanpro_studio/core/storage.dart';
 import 'package:scanpro_studio/features/convert/conversion_service.dart';
+import 'package:scanpro_studio/features/convert/layout/layout_docx.dart';
+import 'package:scanpro_studio/features/convert/layout/layout_model.dart';
+import 'package:scanpro_studio/features/convert/layout/ocr_review.dart';
+import 'package:scanpro_studio/features/convert/ui/ocr_review_screen.dart';
 import 'package:scanpro_studio/features/convert/ooxml/xlsx.dart';
 import 'package:scanpro_studio/features/convert/ui/conversion_centre_screen.dart';
 import 'package:scanpro_studio/features/convert/ui/table_review_screen.dart';
@@ -13,6 +17,7 @@ import 'package:scanpro_studio/features/docsuite/ui/reader_store.dart';
 import 'package:scanpro_studio/features/pdf_editor/engine/pdfium_engine.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 
+import 'convert_support.dart' show officeXml;
 import 'pdf_editor_test.dart' show findPdfium, sfDoc;
 
 void main() {
@@ -150,5 +155,35 @@ void main() {
     expect(e.bookmarks.single.label, 'Chapter 2');
     expect(e.bookmarks.single.page, 2);
     expect(store.recent().first.title, 'Novel');
+  });
+
+  testWidgets('OCR review lists uncertain words and saves a correction into the document', (tester) async {
+    final docx = File('${root.path}/bill.docx');
+    final review = <OcrReviewItem>[];
+    await tester.runAsync(() async {
+      final page = LayoutPage(const Size(595, 842), lines: [
+        LLine([LWord('Rank', const Rect.fromLTWH(60, 100, 30, 12), confidence: 0.95), LWord('Mai', const Rect.fromLTWH(100, 100, 22, 12), confidence: 0.41)]),
+      ], fromScan: true)
+        ..omitted = [('HESS', const Rect.fromLTWH(400, 500, 40, 10))];
+      docx.writeAsBytesSync(writeLayoutDocx([page], review: review));
+      File(reviewPathFor(docx.path)).writeAsStringSync(encodeReview(review, [page.size]));
+    });
+    expect(review.where((i) => !i.omitted).single.text, 'Mai');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (c) => TextButton(
+        onPressed: () => Navigator.of(c).push(MaterialPageRoute(builder: (_) => OcrReviewScreen(docxPath: docx.path, name: 'bill.docx'))), child: const Text('go'))))));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('confidence 41%'), findsOneWidget);
+    expect(find.text('HESS'), findsOneWidget, reason: 'words left out are listed');
+    await tester.enterText(find.byType(TextField), 'Maj');
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Save'));
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    });
+    await tester.pumpAndSettle();
+    final xml = officeXml(docx.path, 'word/document.xml');
+    expect(xml, allOf(contains('>Maj<'), isNot(contains('>Mai<')), contains('>Rank<')));
+    expect(xml, isNot(contains('w:highlight')));
+    expect(decodeReview(File(reviewPathFor(docx.path)).readAsStringSync()).$1.firstWhere((i) => !i.omitted).text, 'Maj');
   });
 }

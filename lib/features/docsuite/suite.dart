@@ -68,7 +68,7 @@ Future<List<PdfWord>> mlKitOcr(Uint8List png, int width, int height, String scri
     final words = await ocr.recognizeWords(path, script: script);
     return [
       for (final w in words)
-        PdfWord(w.text, Rect.fromLTRB(w.left, w.top, w.right, w.bottom), confidence: w.confidence ?? 0.8),
+        PdfWord(w.text, Rect.fromLTRB(w.left, w.top, w.right, w.bottom), confidence: w.confidence ?? 0.8, line: w.line),
     ];
   } finally {
     await ocr.dispose();

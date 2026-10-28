@@ -1,155 +1,213 @@
-# PDF → Word: layout-preserving conversion
+# PDF → Word: layout-preserving, editable conversion
 
-This page covers the diagnosis of the layout bug, the three conversion modes, the processing stages, the regression case and its measured results, and the known limits.
+This page covers:
+- why earlier outputs looked wrong;
+- the three conversion modes;
+- the processing stages and the rules that keep text and pictures apart;
+- the OCR review;
+- the regression cases and their measured results;
+- the known limits.
 
-## 1. Diagnosis (why the old output looked wrong)
+The reference case is the photographed MCTE MHOW mess bill, kept in `test/fixtures/mess_bill/`:
 
-The regression case is a photographed one-page bill: `test/fixtures/mess_bill/source.pdf` (a 1080×1440 JPEG on an A4 page). The bad output the app produced is `previous_output.docx`. The old converter:
-
-- **Threw the page image away.** The page had no text layer, so it went through OCR, and only the recognised text was kept. The QR code, the seal, the stamp and the signature were never extracted, so the DOCX had **0 pictures**.
-- **Rebuilt the page as flowing paragraphs.** OCR lines were grouped into paragraphs by vertical gaps and written with default spacing. Word re-flowed them, so every position was lost, including:
-  - centred headings;
-  - the two-sided "Month : Oct-26" lines;
-  - the right-aligned amounts;
-  - the notes.
-- **Guessed tables only from text alignment.** The ruled charges table was not detected from its lines. Merged cells, borders, the shaded heading band and the total row were lost.
-- **Ignored the photo's geometry.** OCR ran on the tilted, perspective-distorted photo, so line and column grouping was unstable.
-- **Used no font metrics.** Sizes came from box heights, so text widths did not match the original.
-
-Measured on the old output (`report/before_report.md`, rendered with LibreOffice and compared with the source):
-
-| Measure | Value |
+| File | What it is |
 |---|---|
-| SSIM | 0.54 |
-| Median word displacement | **89 pt** |
-| 90th percentile displacement | 212 pt |
-| Pictures | 0 |
-| OCR word recall | 0.87 |
+| `source.pdf` | The photographed bill: a 1080×1440 JPEG on an A4 page |
+| `source_image.jpg` | The embedded photo |
+| `target_screenshot.jpg` | The target appearance |
+| `previous_output.docx` | The first bad output |
+| `phone_v1.0.10/` | What v1.0.10 produced on a phone: `editable.docx` and its LibreOffice render, and `page_image.docx` (Automatic/Faithful) |
+| `report/` | The current outputs and every comparison image and report |
+
+## 1. Diagnosis
+
+### 1a. The first converter (`previous_output.docx`)
+
+- **The page image was discarded.** Only OCR text was kept: no QR code, seal, stamp or signature, so the DOCX had 0 pictures.
+- **Text was rebuilt as flowing paragraphs** with default spacing. Every position was lost: the median word was **89 pt** away from where it is on the bill.
+- **Tables were guessed from text alignment**, not from the ruled lines, so borders, merged cells and the shaded band were lost.
+- **OCR ran on the tilted photo**, with no perspective correction and no font metrics.
+
+### 1b. v1.0.10 on a phone (`phone_v1.0.10/editable.docx`)
+
+The fix for 1a passed every test here, but failed on the phone. The phone's DOCX has **6 pictures**. Two are wide strips cut from the photo:
+- one across the contact line;
+- one across the shaded band and the "Bill No / Month" line.
+
+OCR text was then placed on top of the strips, so the content appears twice. Other symptoms:
+- the stamp is split into pieces;
+- its printed text was OCR'd into the document ("MESS SECRETARY", "oFFRS HESS MCTE");
+- the "1" in the table is missing;
+- there are yellow highlights.
+
+**The root cause is OCR engine dependence.** The tests used tesseract, whose word boxes fit the ink tightly. The phone uses ML Kit, whose element boxes are looser, offset, and sometimes span two lines. Every later stage used the OCR boxes directly:
+- shaded-band detection compared the paper above and below a word box;
+- graphics detection treated any ink outside word boxes as a picture;
+- line grouping used box overlap;
+- font size used box width and height.
+
+With ML Kit's boxes this went wrong in several ways:
+- band detection failed;
+- the band and nearby text ink became "graphics";
+- lines merged;
+- sizes blew up.
+
+Reproduced here: tesseract words with ML Kit-like boxes (padded by 0.2–0.5 of their height, or whole lines split evenly into words) produced the same strips. With very loose boxes the page also overflowed to two pages, with oversized text and noise like "iy" placed as text.
 
 ## 2. Modes
 
-The choice is under **Conversion Centre → PDF → Word**. Each option shows an explanation.
+Choose under **Conversion Centre → PDF → Word**. Each option is explained on screen.
 
 | Mode | What you get | Editable? |
 |---|---|---|
-| **Faithful layout** | One page-sized picture per page, placed behind an empty paragraph, in a Word section with the source page's exact size and orientation. When the page is a single upright JPEG (a typical scan), the **original JPEG bytes** are embedded unchanged. Otherwise the page is rendered at the chosen resolution (default 300 dpi, 150–400 under *Advanced*) as JPEG at the chosen quality. | No. The result says so. |
-| **Editable document** | Digital pages are rebuilt from the PDF's own text, fonts, sizes, colours, ruling lines and images. Scanned pages go through the scan pipeline below. Text is real Word text in paragraphs and tables at the original positions. Seals, stamps, signatures, QR codes and logos are pictures anchored where they were. | Yes. |
-| **Automatic** (default) | Per page: scanned pages use Faithful, digital pages use Editable. The result lists what was chosen ("1 page(s) were kept as page images (Automatic: scanned pages)…", "N digital page(s) rebuilt…"). | Digital pages only |
+| **Faithful layout** | One page-sized picture per page, at the exact page size and orientation. A single-JPEG scan keeps its original JPEG bytes; other pages are rendered at 300 dpi (150–400 under *Advanced*). | No. The result says so. |
+| **Editable document** | Real Word paragraphs and tables at the original positions. Seals, stamps, signatures and QR codes are separate pictures. **There is never a page image or text strip behind the text.** | Yes |
+| **Automatic** (default) | Scanned pages are Faithful and digital pages are Editable. The result says which was chosen for each page. | Digital pages |
 
-Other options:
-- **Highlight uncertain words** (default on) highlights words that OCR read with low confidence, so they can be checked. Nothing is ever invented: an unreadable word is left as OCR read it and highlighted.
-- The existing preview before saving still applies.
+Uncertain OCR words are **not highlighted** by default. Highlighting is an opt-in option ("Highlight uncertain words (review copy)"). See §4.
 
-## 3. Stages
+## 3. Stages (Editable document, scanned page)
 
-```
-PDF page ─┬─ digital ─► nativeLayout ─────────────────────────────────┐
-          │   words + fonts (PDFium), ruling lines → findGrids,       │
-          │   images, underlines from rules                           │
-          │                                                           ▼
-          ├─ scanned ─► pageImage / renderOriginal ─► prepareScan ─► OCR ─► buildScanLayout ─► second OCR pass ─► LayoutPage ─► writeLayoutDocx
-          │                                                                (missed regions)
-          └─ faithful ─► pageImage (original JPEG or 300 dpi render) ────────────────────────► LayoutPage(background)
-```
+Code: `lib/features/convert/layout/`, wired up in `ConversionService._pdfToDocx`.
 
-Code: `lib/features/convert/layout/`, wired up in `ConversionService._pdfToDocx`. Heavy steps run in background isolates.
+1. **Page image**: the page's original JPEG, or a render.
+2. **Preparation** (`prepareScan`, analysis only):
+   - find the paper corners on the dark background;
+   - apply a homography warp so the page is straight and flat;
+   - normalise the lighting.
 
-1. **Page image** (`PdfiumSession.pageImage`). Returns the page's original JPEG when the page is just one upright image (letterboxed is fine); otherwise it renders the page.
-2. **Scan preparation** (`prepareScan`):
-   - `findPaperQuad` floods the dark background from the border, fits a line robustly to the middle of each paper edge, and intersects the lines to get the corners;
-   - a homography warp straightens the paper.
+   Every element found later is mapped back through the same inverse homography and page rectangle, so text, tables and pictures share **one coordinate transform**.
+3. **OCR**: ML Kit on the phone, with words, boxes, confidences and **the engine's line ids**.
+4. **Ink geometry** (`InkGeometry`, new). OCR supplies the text and roughly where it is; the image supplies the geometry:
+   - **remove long strokes**: horizontal and vertical runs longer than about 2.6 text heights (underlines, borders), so letters touching them separate;
+   - **find letters**: connected ink components. Thin, tall pieces of short cell borders, isolated specks and hairlines are discarded;
+   - **position words**: each word's position comes from the ink inside its box, and lines are the engine's own lines;
+   - **assign ink to lines**: each component goes to the line of the nearest word, using that line's letter height;
+   - **cut into words**: along each line, components that overlap horizontally form glyph clusters, and the words are cut at real gaps. A dynamic program picks the cuts that match OCR's boundaries, while strongly preferring wide gaps (a space is about 0.39 cap height in Arial; letter gaps are under 0.15);
+   - **leave unread ink alone**: word-sized ink runs at the ends of a line that no OCR box reaches are left unassigned for the second OCR pass;
+   - **drop non-text words**:
+     - ink lighter or more coloured than the page's printed text (stamp text, the shadow at the paper edge);
+     - words with no ink;
+     - "words" several lines tall (noise on a signature or seal);
+   - **resolve duplicates**: the same ink read twice keeps the more confident reading.
+5. **Ruling lines**: traced in the ink outside the snapped words.
+6. **Shaded bands**: a band is darker than the paper above and below it, measured beside the text.
+7. **Tables** (`findGrids`):
+   - grids are built from the ruling lines;
+   - a vertical line that would cut a word is not a column border;
+   - **a horizontal line that is just an underline of the words above it is not a row border**;
+   - cells merge across missing borders.
+8. **Graphics**: faint-ink components outside text, lines, bands and tables. **A candidate that contains whole words of printed text (8 or more letters or digits) is rejected: it is text, not a picture.** QR density is measured on the full ink, so module edges taken for lines still count. Classes:
+   - QR code: dense and square; the crop is binarised;
+   - stamp or seal: sparse line art; the crop is whitened, so paper becomes white and ink keeps its colour;
+   - signature;
+   - graphic.
+9. **Second OCR pass**: text-height ink that no word covers (for example a table cell or a heading OCR skipped) is cropped. Each crop gets a white margin and is enlarged if small, then read again. Only confident words containing a letter or digit are taken. The layout is then rebuilt with all words.
+10. **Typography**:
+    - sizes are fitted from ink width with Arial/Times metrics; one- and two-character words are sized from their height;
+    - bold comes from stroke width, decided per phrase by its average stroke;
+    - underlines come from ink runs.
+11. **Layout check** (`checkLayout`, new). Every page is checked for:
+    - pictures covering text;
+    - pictures overlapping each other;
+    - text placed over a table;
+    - lines reconstructed twice;
+    - a full-page picture.
 
-   This rectified copy is used **only for analysis**. Pictures are cropped from it, but the output never contains a "corrected" version of the text.
-3. **OCR** (ML Kit on the device; `recognizeWords` returns per-word boxes and confidence).
-4. **Scan analysis** (`buildScanLayout`):
-   - **Masks**: illumination-normalised ink, coloured ink, faint stroke-like ink (for pale seals), and outside-the-paper areas.
-   - **Ruling lines**: traced with drift tolerance (photographed lines are slightly tilted), with short breaks joined.
-   - **Words**: OCR border artefacts (`[`, `|`) are stripped and boxes are trimmed to the ink. A word's size is fitted from its ink width using real font metrics (Liberation Sans/Serif = Arial/Times widths). Sizes are harmonised per line and page. Bold comes from relative stroke width, made consistent across a phrase. Underlines come from ink runs under the words.
-   - **Tables** (`findGrids`, shared with digital pages): touching horizontal and vertical lines, clustered. A vertical line that would cut through a word or phrase is rejected, and so is a horizontal line that is only an underline. Missing borders become row and column spans. Cell shading is detected per cell against the paper colour.
-   - **Shaded bands**: a heading band darker than the paper above and below it.
-   - **Graphics**: faint-mask components that are not text, lines, bands or tables. Each is classified as QR code, stamp, signature or graphic, and cropped (QR binarised, stamps whitened, everything else as photographed).
-   - **Missed text**: ink of text-line height that no OCR word covers is listed in `unread`. Those regions are OCR'd again, enlarged, in a second pass. This recovers table cells an OCR engine skipped as one empty block.
-   - Everything is mapped back to page points through the inverse homography.
-5. **DOCX writer** (`writeLayoutDocx`):
-   - one Word section per source page with the same page size, 14 pt margins and no added pages;
-   - paragraphs with exact line heights and spacing taken from the source baselines;
-   - tab stops for two-sided lines;
-   - first-line and hanging indents for wrapped notes;
-   - letter spacing so each word has its source width;
-   - matched gaps between words;
-   - tables in fixed layout with exact row heights, `gridSpan`/`vMerge`, cell shading and alignment from the text position (amounts right-aligned);
-   - the shaded band as a borderless shaded cell;
-   - pictures as `wp:anchor` elements relative to the page, each with a description (e.g. "QR code").
+    Any finding is added to the result notes ("check the layout: …").
+12. **DOCX** (`writeLayoutDocx`):
+    - one section per page, same page size, 14 pt margins;
+    - paragraphs with exact line heights and spacing from the source baselines;
+    - tab stops for two-sided lines; **label/value blocks share aligned stops**, so labels, colons and values line up;
+    - first-line/hanging indents and kept line breaks for notes;
+    - fixed-layout Word tables with merges, borders, shading and alignment;
+    - the band as a borderless shaded cell;
+    - pictures anchored to the page with descriptions ("QR code", "Stamp or seal");
+    - Devanagari runs use a complex-script font (Mangal) and are marked as Hindi.
 
-Fonts are estimated (Arial or Times New Roman metrics). The app never claims an exact font match.
+Digital pages skip steps 2–10. Their text, fonts, ruling lines and images come from the PDF itself.
 
-## 4. Regression case and visual comparison
+## 4. OCR review
 
-`test/tools/visual_compare.py SOURCE.pdf OUTPUT.docx OUT_DIR LABEL` runs the comparison. It:
-- renders the DOCX with LibreOffice and both PDFs with Poppler at 100 dpi;
-- checks page count and size;
-- computes SSIM and mean difference;
-- writes a heatmap and a side-by-side image;
-- runs OCR on both renders and measures how far each matched word moved, plus word recall and precision;
-- counts the DOCX's pictures, runs and tables.
+- **In the document.** Words read with low confidence are written normally (no highlight). Each is wrapped in a hidden bookmark `_OCR_<n>`.
+- **The review list.** A file `<name>.docx.review.json` is kept beside the output. For each uncertain word it records the page and position, the confidence and the line it was read in. It also lists words left out of the text (stamp text, noise).
+- **Reviewing.** In the job's file menu, **Review OCR words** lists these words. The user corrects them and taps Save. Only those runs are rewritten (`applyOcrCorrections`); no other part of the document changes.
+- **No automatic correction.** Names, dates and amounts are never corrected automatically. OCR's reading is kept until a person changes it.
 
-`test/layout_test.dart` runs it on every case when LibreOffice and tesseract are installed. Run it with `SCANPRO_REPORT_DIR=dir` to keep the outputs.
+## 5. Validation
 
-The outputs for the reference bill are committed in `test/fixtures/mess_bill/report/`:
-- `messbill_faithful*`, `messbill_editable*` and `messbill_auto*` (DOCX, rendered PDF, side-by-side, heatmap, report);
-- `before_*` for the old output;
-- `test_c/` for the other tests.
+Run `test/layout_test.dart`. Comparisons need LibreOffice and tesseract (plus zbar for the QR check). Set `SCANPRO_REPORT_DIR` to keep the outputs. The current outputs are committed in `test/fixtures/mess_bill/report/`.
 
-### Results (LibreOffice 24.2 rendering, tesseract 5.3.4 standing in for ML Kit)
+### Tools
 
-**Test A – mess bill, Faithful**:
-- 1 page, A4, 1 picture;
-- the embedded JPEG is **byte-identical** to the source image;
-- SSIM 0.9994, mean difference 0.2/255;
-- word displacement median 0.0 pt, max 3.3 pt; OCR recall 0.98.
+- `test/tools/visual_compare.py`:
+  - renders the DOCX with LibreOffice and checks page count and size;
+  - computes SSIM and writes a heatmap and a side-by-side image;
+  - measures OCR word displacement and recall/precision;
+  - counts pictures, runs and tables.
+- `test/tools/edit_check.py` edits the DOCX with python-docx, an independent library:
+  - changes the title, "Maj" → "Col", the amount cell and a note;
+  - moves the QR code and replaces the seal image;
+  - saves, reopens and re-renders, then checks that every edit took and that the page count and pictures are unchanged.
 
-The remaining difference is LibreOffice's resampling of the picture.
+### Results (LibreOffice 24.2, tesseract 5.3.4)
 
-**Test B – mess bill, Editable**:
-- 1 page, A4, no extra pages.
-- Pictures: 3 (QR code, seal, stamp with signature).
-- Tables: 2. The shaded heading band, and the charges table with:
-  - 3 rows × 4 columns, including the narrow empty column in the header that the bill has;
-  - the total label spanning 3 columns;
-  - right-aligned amounts.
-- All the wording and values the test checks are present.
-- Word displacement: median **1.8 pt**, 90th percentile 5.4 pt.
-- Recall 0.89, precision 0.93.
-- SSIM 0.68. This is low by nature: the output is a clean white page, the source is a photo with shadows, so SSIM can't be compared with Test A.
-- Largest displacements: the end of note line 2 ("through POS", 25–30 pt), "Note", and the "Mess ACCOMMODATION" band heading (12–14 pt).
+**Mess bill, Editable** (`report/messbill_editable*`, and `messbill_source_target_new.png` for source vs target vs new):
 
-The output is **not** pixel-identical to the photo and doesn't claim to be.
+| Check | Result |
+|---|---|
+| Pages | 1, A4 |
+| Pictures | 3: QR code, seal, stamp with signature |
+| Page image or strips behind text | None |
+| Highlights | None |
+| Tables | Shaded band; charges table of 3 rows × 4 columns (the bill's narrow empty column included). The total spans 3 columns and the amounts are right-aligned |
+| Word displacement vs the photo | Median 2.2 pt, 90th percentile 5.6 pt |
+| OCR word recall | 0.89 |
+| QR code | Decodes to the same UPI payload as the photo (zbar) |
+| Layout check | No findings |
+| Review list | 5 uncertain words ("Mhow,", "Indore", "(M.P).", "Note", "Mess") |
+| Coverage overlay | `messbill_editable_coverage.png` |
 
-**Automatic, mess bill**: the page is kept as a page image and the result says why.
+**The same bill with four OCR box styles** (`report/ocr_variants/`):
 
-**Test C**:
+| Box style | Pictures (strips) | Tables | Median / p90 displacement | Recall |
+|---|---|---|---|---|
+| Tight (tesseract) | 3 (0) | 2 | 3.1 / 7.4 pt | 0.92 |
+| Padded 0.2 h | 3 (0) | 2 | 2.9 / 6.5 pt | 0.92 |
+| Padded 0.5 h | 3 (0) | 2 | 3.1 / 7.4 pt | 0.92 |
+| Lines split evenly | 3 (0) | 2 | 2.6 / 12.0 pt | 0.86 |
 
-| Case | Mode | Pages / sizes | Median / p90 displacement | SSIM | Notes |
-|---|---|---|---|---|---|
-| C1 digital 2-page report (headings, bullets, ruled table, image) | Editable | 2/2, match | p1 0.7 / 3.2 pt, p2 0.7 / 1.8 pt | 0.95 / 0.99 | Table, image and text kept |
-| C1 same | Faithful | 2/2, match | 0.4 / 0.8 pt | 0.98 / 0.996 | |
-| C2 report page rotated 3° on a dark desk (photo-like scan) | Editable | 1/1 | 3.3 / 7.6 pt | 0.74 | Text straightened. Table rebuilt only after the second OCR pass: the first pass returned the table as one empty block. Recall 0.75 |
-| C2 mixed PDF (digital page + that scan) | Automatic | 2/2 | – | – | Scan page kept as a page image, digital page as text. Both are reported |
-| C3 A4 portrait, A5 landscape, Letter | Editable | 3/3, sizes match | ≈1.1 / 1.4 pt | ≥0.99 | |
-| C3 same | Faithful | 3/3, sizes match | ≈0.5 / 0.7 pt | ≥0.998 | |
+For comparison, the v1.0.10 phone output had 6 pictures, 2 of them strips, and is kept as a failing fixture. In the line-split case the header words of the charges table can land one cell off; the test records this.
 
-## 5. Limitations
+**Editability** (`report/edit_check/`): all 13 checks pass. The edited file renders on one page with every edit visible.
 
-- **Bold on blurry photos.** Bold detection from stroke width is approximate; for example, the bill's "Total Amount (Rounded off)" row comes out regular weight.
-- **Underlines missed.** Some underlines are not found when the underline touches the word's box (e.g. "Sr.").
-- **OCR errors are kept, not corrected.** They are highlighted instead; on the bill: "1," for "1.", "Mess" for "MESS", "BillNo".
-- **Paper curl.** Only a 4-corner perspective is corrected. Curled paper (the bottom of the bill) leaves a few words up to ~30 pt off.
-- **Fonts on scans** are estimated as Arial (or Times for serif digital fonts). Word substitutes fonts that aren't installed.
-- **Digital pages:**
-  - hyperlinks and filled vector shapes are not rebuilt (ruled tables, underlines and images are);
-  - pages placed inside form XObjects (e.g. merged with some tools) lose their ruling lines and images in Editable mode, though the text is kept.
-- **OCR engine.** On the device ML Kit does the OCR, and tests use tesseract, so results on a phone will differ from the numbers above.
-- **Validation runs locally only.** The LibreOffice comparison runs where LibreOffice is installed (locally). CI installs tesseract, so Tests A–C run there, but the visual comparison parts are skipped.
-- **Complex tables.** Tables without ruling lines are written as tab-aligned lines, not Word tables.
+**Mess bill, Faithful**:
+- the embedded JPEG is byte-identical to the source;
+- SSIM 0.9994;
+- word displacement 0.0 pt median.
 
-No paid SDK was added. Everything runs offline on the device with the libraries already in the app (PDFium, ML Kit, `image`).
+**Other documents** (`report/test_c/`):
+
+| Case | Result |
+|---|---|
+| Digital 2-page report | Editable: median 0.7 pt, table and image kept. Faithful: SSIM ≥ 0.98 |
+| Scan rotated 3° on a desk | Editable: text straightened; the table rebuilt after the second OCR pass |
+| Mixed digital + scanned PDF, Automatic | Page image for the scan, text for the digital page |
+| A4, A5 landscape and Letter | Sizes and orientation kept in both modes |
+| Hindi + English | Digital: Devanagari kept as text. Photographed form with the Hindi model: Devanagari and English rebuilt as text with aligned labels; tesseract dropped the "1" of "1,250.00" and it is not guessed |
+
+All results come from rendering with LibreOffice. Microsoft Word may differ slightly, for example in font substitution and line spacing.
+
+## 6. Limitations
+
+- **ML Kit is not in these tests.** ML Kit runs only on a phone; the tests here use tesseract and tesseract-derived box styles to imitate it. The four box styles converge, but real ML Kit output wasn't tested directly.
+- **Bold detection is approximate on photos.** For example, the bill's "Room Type" and total row come out regular weight.
+- **Some OCR errors are kept** (and listed for review): "To + 17-Oct-2026" ("+" read for ":"), "BillNo", "1," for "1.", "Mess" for "MESS", and the missing colon after "Note".
+- **Curled paper** is only perspective-corrected, so a few words end up up to ~25 pt off.
+- **Fonts on scans** are estimated as Arial or Times. No exact font match is claimed.
+- **Split boxes:** with evenly split line boxes, words in wide table rows can be assigned one cell off.
+- **Digital pages:** hyperlinks and filled vector shapes are not rebuilt. Pages wrapped in form XObjects lose their ruling lines and images in Editable mode.
+- **Complex tables:** tables without ruling lines become tab-aligned lines, not Word tables.
+- **CI coverage:** CI has no LibreOffice, so the visual comparisons run locally only. Tesseract (English and Hindi) and zbar run in CI.
+
+No paid SDK is used. Everything runs offline on the device.

@@ -127,6 +127,10 @@ class LayoutPage {
   /// but where OCR found no words; they can be read again.
   List<Rect> unread = const [];
 
+  /// Scans only: words OCR read that are not in the rebuilt text because
+  /// they belong to a picture (stamp text) or are noise (page points).
+  List<(String, Rect)> omitted = const [];
+
   LayoutPage(this.size, {List<LLine>? lines, List<LTable>? tables, List<LGraphic>? graphics, List<LShade>? shades, List<String>? warnings, this.background, this.fromScan = false})
       : lines = lines ?? [],
         tables = tables ?? [],

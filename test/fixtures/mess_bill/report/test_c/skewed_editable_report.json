@@ -22,18 +22,30 @@
   "pages": [
     {
       "page": 1,
-      "ssim": 0.7422,
-      "mean_abs_diff": 53.75,
-      "pixels_differing_over_64": 0.2383,
+      "ssim": 0.7424,
+      "mean_abs_diff": 53.72,
+      "pixels_differing_over_64": 0.2382,
       "ocr_words_source": 48,
-      "ocr_words_output": 46,
+      "ocr_words_output": 50,
       "matched_words": 36,
       "word_recall": 0.75,
-      "word_precision": 0.783,
+      "word_precision": 0.72,
       "displacement_pt_median": 3.32,
-      "displacement_pt_p90": 7.64,
+      "displacement_pt_p90": 7.95,
       "displacement_pt_max": 10.46,
       "largest_displacements": [
+        {
+          "word": "revenue",
+          "source": [
+            125,
+            148
+          ],
+          "output": [
+            126,
+            159
+          ],
+          "pt": 10.5
+        },
         {
           "word": "on",
           "source": [
@@ -42,18 +54,6 @@
           ],
           "output": [
             501,
-            159
-          ],
-          "pt": 10.5
-        },
-        {
-          "word": "revenue",
-          "source": [
-            125,
-            148
-          ],
-          "output": [
-            125,
             159
           ],
           "pt": 10.4
@@ -77,10 +77,10 @@
             97
           ],
           "output": [
-            296,
+            295,
             89
           ],
-          "pt": 7.6
+          "pt": 8.0
         },
         {
           "word": "strategy",

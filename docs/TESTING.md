@@ -76,8 +76,10 @@ PDF and a password-protected PDF.
    - Automatic: the notes say the page was kept as a page image; Word shows the photo, not editable.
    - Faithful layout: same, at the chosen resolution (Advanced).
    - Editable document: centred headings, shaded band, ruled table with right-aligned amounts, QR code /
-     seal / signature as pictures in place, low-confidence words highlighted. Compare side by side with the
-     PDF and note differences. Turn OCR off: the page is kept as an image and the notes say so.
+     seal / signature as separate pictures in place, no highlights, no picture strips behind text. Compare
+     side by side with the PDF. In Word: edit the title, a detail and the amount cell; move the QR code;
+     replace the seal (Change Picture); save and reopen. File menu → Review OCR words: correct one word,
+     Save, reopen the file. Turn OCR off: the page is kept as an image and the notes say so.
 3. PDF to Excel with a bank statement → Review tables → merge two columns, delete one, fix a cell → Export
    XLSX → open in Excel/Sheets: numbers are numbers, flagged cells highlighted.
 4. PDF to images: PNG, 300 dpi, pages "2-3", ZIP → estimated size shown → open the ZIP.
