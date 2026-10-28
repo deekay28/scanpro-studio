@@ -340,7 +340,7 @@ class _ScanAnalyzer {
       page.tables.add(t);
     }
     for (final sh in shades) {
-      page.shades.add(LShade(mapRect(sh.$1), sh.$2));
+      page.shades.add(LShade(_alignBand(mapRect(sh.$1), page), sh.$2));
     }
     for (final (r, kind) in graphics) {
       // Leftovers of table borders inside a table are not pictures.
@@ -348,7 +348,14 @@ class _ScanAnalyzer {
       page.graphics.add(_crop(r, kind));
     }
     _harmoniseSizes(page);
-    page.unread = _unread(words, graphicRects);
+    page.unread = _unread(words, graphicRects, rules);
+    final hs = words.map((x) => x.box.height).toList()..sort();
+    final th = hs.isEmpty ? 0.0 : hs[hs.length ~/ 2];
+    page.unreadInTables = [
+      for (final r in page.unread)
+        if (r.height <= th * 2 && r.width <= th * 2.5)
+          if (mapRect(r) case final m when page.tables.any((t) => t.box.deflate(2).contains(m.center))) m,
+    ];
     page.omitted = [
       for (final d in droppedWords)
         if (d.text.replaceAll(RegExp(r'[^A-Za-z0-9\u0900-\u097F]'), '').length >= 2) (d.text, mapRect(d.box)),
@@ -1261,15 +1268,56 @@ class _ScanAnalyzer {
     return out;
   }
 
+  /// A band's edges are found where its grey fades into the paper, which in
+  /// a photo runs on into shadows at the paper edge. Printed bands line up
+  /// with the content column: an edge close to the left edge of the table or
+  /// text below, or to the table's right edge, is put there.
+  Rect _alignBand(Rect band, LayoutPage page) {
+    final tol = pageSize.width * 0.08;
+    final below = [
+      for (final t in page.tables)
+        if (t.box.top >= band.bottom - 2 && t.box.top - band.bottom < pageSize.height * 0.3) t.box,
+    ];
+    final lefts = <double>[
+      ...below.map((b) => b.left),
+      for (final l in page.lines)
+        if (l.box.top >= band.bottom - 2 && l.box.top - band.bottom < pageSize.height * 0.15) l.box.left,
+    ];
+    final rights = below.map((b) => b.right).toList();
+    double snap(double v, List<double> to) {
+      var best = v, d = tol;
+      for (final x in to) {
+        if ((x - v).abs() < d) {
+          d = (x - v).abs();
+          best = x;
+        }
+      }
+      return best;
+    }
+
+    // The text column's left edge: the most common start of the lines below.
+    lefts.sort();
+    final colLeft = lefts.isEmpty ? <double>[] : [below.isNotEmpty ? below.first.left : lefts[lefts.length ~/ 4]];
+    final l = snap(band.left, colLeft), r = snap(band.right, rights);
+    return r - l > band.width * 0.5 ? Rect.fromLTRB(l, band.top, r, band.bottom) : band;
+  }
+
   /// Text-like ink that no OCR word covers (OCR engines skip some blocks,
   /// e.g. table cells): small components of a text line's height.
-  List<Rect> _unread(List<PdfWord> words, List<Rect> graphics) {
+  List<Rect> _unread(List<PdfWord> words, List<Rect> graphics, List<_Rule> rules) {
     if (words.isEmpty) return const [];
     final hs = words.map((x) => x.box.height).toList()..sort();
     final th = hs[hs.length ~/ 2];
     // Long strokes only: the traced ruling lines can include the stems of
     // unread capitals.
     final m = InkGeometry(ink, norm, colored, w, h).withoutStrokes(math.max(12, (th * 2.6).round()));
+    // Long traced vertical lines too: photographed cell borders break into
+    // short pieces that would join a lone "1" in a cell into one tall blob.
+    for (final r in rules) {
+      if (r.horizontal || r.length < th * 2.5) continue;
+      final t = r.thickness / 2 + 2;
+      _clear(m, Rect.fromLTRB(r.pos - t, r.a, r.pos + t, r.b));
+    }
     for (final wd in words) {
       _clear(m, wd.box.inflate(3));
     }
@@ -1318,7 +1366,8 @@ class _ScanAnalyzer {
         }
       }
       final r = Rect.fromLTRB((x0 + reach) * cell.toDouble(), y0 * cell.toDouble(), (x1 - reach + 1) * cell.toDouble(), (y1 + 1) * cell.toDouble());
-      if (r.height < th * 0.5 || r.height > th * 2.5 || r.width < th * 0.6 || n < 4) continue;
+      // Narrow is fine: a lone "1" in a table cell is a fifth of a text height wide.
+      if (r.height < th * 0.5 || r.height > th * 2.5 || r.width < th * 0.15 || n < 4) continue;
       out.add(r.inflate(th * 0.35).intersect(Offset.zero & Size(w.toDouble(), h.toDouble())));
     }
     return out.length > 60 ? const [] : out;

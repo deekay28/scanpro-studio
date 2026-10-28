@@ -62,6 +62,15 @@ OcrRecognizer variantOcr(String variant) => (png, w, h, script) async {
             }
           }
           return out;
+        case 'mlkit':
+          // What ML Kit did on the phone (v1.0.11, Scan 2026-10-28-1.docx):
+          // looser boxes, lone ":" and "/" not returned, "Fac/Wing:" read
+          // as "FacWing:", the lone "1" in the table not returned.
+          return [
+            for (final x in words)
+              if (!RegExp(r'^[:/|]+$').hasMatch(x.text) && x.text != '1')
+                PdfWord(x.text.replaceAll('/', x.text.length > 2 ? '' : '/'), x.box.inflate(x.box.height * 0.2), confidence: 0.75 + x.confidence! * 0.25, line: x.line),
+          ];
         default:
           final pad = double.parse(variant.substring(3));
           return [for (final x in words) PdfWord(x.text, x.box.inflate(x.box.height * pad), confidence: 0.75 + x.confidence! * 0.25, line: x.line)];
@@ -232,7 +241,7 @@ void main() {
     final old = officeXml('test/fixtures/mess_bill/phone_v1.0.10/editable.docx', 'word/document.xml');
     expect(stripPictures(old, 595.3), 2, reason: 'the regression fixture shows the original failure');
     expect(RegExp('<wp:anchor ').allMatches(old).length, 6);
-    for (final variant in ['pad0', 'pad0.2', 'pad0.5', 'split']) {
+    for (final variant in ['pad0', 'pad0.2', 'pad0.5', 'split', 'mlkit']) {
       final svc = ConversionService(unicodeFont: freeSans, ocr: variantOcr(variant));
       final dir = Directory(p.join(work.path, 'v_$variant'))..createSync();
       final r = await svc.run(ConversionType.pdfToDocx, [(messBill, 'bill.pdf', null)], const ConversionOptions(docxMode: DocxMode.editable), dir.path, 'bill_$variant');
@@ -257,6 +266,32 @@ void main() {
         expect(text, contains(t), reason: '$why: $t');
       }
       expect(text.toUpperCase(), contains('MESS ACCOMMODATION'), reason: '$why: the band heading is complete');
+      // Labels keep their colons and slashes even when OCR leaves them out
+      // (read from the ink: two stacked dots, a rising stroke).
+      final paras = (s['paragraphs'] as List).cast<String>().map((x) => x.replaceAll(RegExp(r'\s+'), ' ')).toList();
+      for (final label in ['Rank', 'Name', 'Status', 'From', 'Date']) {
+        expect(paras.any((x) => RegExp('$label ?:').hasMatch(x)), isTrue, reason: '$why: "$label :" in $paras');
+      }
+      expect(text, contains('Fac/Wing'), reason: why);
+      expect(text, contains('Credit /Debit'), reason: why);
+      if (variant == 'mlkit') {
+        // The lone "1" OCR didn't return (and can't read from a crop) is
+        // reported and listed for review, not silently lost.
+        expect(r.warnings.join(' '), contains('could not be read'), reason: why);
+        expect(File(reviewPathFor(docx)).readAsStringSync(), contains('unread mark in a table cell'), reason: why);
+      }
+      expect(paras.any((x) => RegExp('Bill ?No ?:').hasMatch(x)), isTrue, reason: '$why: $paras');
+      expect(text, matches(RegExp(r"at par\S? / crossed")), reason: why);
+      // The grey band lines up with the table below it.
+      final bandTbl = RegExp(r'<w:tbl>.*?</w:tbl>').allMatches(xml).map((m) => m[0]!).toList();
+      double edge(String t, {bool right = false}) {
+        final ind = int.parse(RegExp(r'<w:tblInd w:w="(-?\d+)"').firstMatch(t)![1]!);
+        final cols = RegExp(r'<w:gridCol w:w="(\d+)"').allMatches(t).map((m) => int.parse(m[1]!)).fold(0, (a, b) => a + b);
+        return 14 + (right ? ind + cols : ind) / 20;
+      }
+      final band = bandTbl.firstWhere((t) => t.contains('ACCOMMODATION')), table = bandTbl.firstWhere((t) => t.contains('99,491.00'));
+      expect(edge(band), closeTo(edge(table), 1.5), reason: '$why: band starts where the table starts');
+      expect(edge(band, right: true), closeTo(edge(table, right: true), 1.5), reason: '$why: band ends where the table ends');
       final tables = (s['tables'] as List).cast<List>();
       final charges = tables.firstWhere((t) => jsonEncode(t).contains('99,491.00'));
       expect(charges.length, 3, reason: '$why: header, charges and total rows');

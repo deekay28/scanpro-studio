@@ -131,6 +131,10 @@ class LayoutPage {
   /// they belong to a picture (stamp text) or are noise (page points).
   List<(String, Rect)> omitted = const [];
 
+  /// Scans only: marks inside table cells that no OCR pass could read
+  /// (page points), so a cell isn't silently left empty.
+  List<Rect> unreadInTables = const [];
+
   LayoutPage(this.size, {List<LLine>? lines, List<LTable>? tables, List<LGraphic>? graphics, List<LShade>? shades, List<String>? warnings, this.background, this.fromScan = false})
       : lines = lines ?? [],
         tables = tables ?? [],

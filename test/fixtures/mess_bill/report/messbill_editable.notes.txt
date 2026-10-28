@@ -1,2 +1,2 @@
 Page 1 (scan) rebuilt as editable text (OCR): 18 text line(s), 1 table(s) with 9 cell(s), 1 shaded band(s), 3 picture(s) (pictures: QR code, stamp or seal, stamp or seal). Fonts are estimated from the scan (Arial); bold text is detected from stroke width and may be missed.
-5 word(s) were read with low OCR confidence. They are not highlighted in the document; use "Review OCR words" in the file's menu to check and correct them.
+7 word(s) were read with low OCR confidence. They are not highlighted in the document; use "Review OCR words" in the file's menu to check and correct them.

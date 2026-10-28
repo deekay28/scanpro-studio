@@ -22,9 +22,9 @@
   "pages": [
     {
       "page": 1,
-      "ssim": 0.6713,
-      "mean_abs_diff": 53.16,
-      "pixels_differing_over_64": 0.2229,
+      "ssim": 0.6709,
+      "mean_abs_diff": 53.37,
+      "pixels_differing_over_64": 0.2238,
       "ocr_words_source": 100,
       "ocr_words_output": 98,
       "matched_words": 92,

@@ -101,6 +101,9 @@ Uint8List writeLayoutDocx(List<LayoutPage> pages, {String title = '', bool highl
     for (final (text, box) in page.omitted) {
       review?.add(OcrReviewItem(id: 0, page: pi + 1, text: text, box: box, omitted: true));
     }
+    for (final box in page.unreadInTables) {
+      review?.add(OcrReviewItem(id: 0, page: pi + 1, text: '(unread mark in a table cell)', box: box, omitted: true));
+    }
     final paras = w.build();
     // Graphics are anchored to the first paragraph of the page.
     final anchors = page.graphics.map((g) => anchor(g)).join();

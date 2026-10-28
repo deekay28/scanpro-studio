@@ -17,22 +17,22 @@
   "page_count_match": true,
   "page_size_match": true,
   "docx_pictures": 3,
-  "docx_text_runs": 188,
+  "docx_text_runs": 195,
   "docx_tables": 2,
   "pages": [
     {
       "page": 1,
-      "ssim": 0.6753,
-      "mean_abs_diff": 53.27,
-      "pixels_differing_over_64": 0.2232,
+      "ssim": 0.6725,
+      "mean_abs_diff": 53.35,
+      "pixels_differing_over_64": 0.2237,
       "ocr_words_source": 100,
-      "ocr_words_output": 94,
-      "matched_words": 86,
-      "word_recall": 0.86,
-      "word_precision": 0.915,
-      "displacement_pt_median": 2.55,
+      "ocr_words_output": 96,
+      "matched_words": 87,
+      "word_recall": 0.87,
+      "word_precision": 0.906,
+      "displacement_pt_median": 2.52,
       "displacement_pt_p90": 11.97,
-      "displacement_pt_max": 171.74,
+      "displacement_pt_max": 171.73,
       "largest_displacements": [
         {
           "word": "amount",
@@ -54,7 +54,7 @@
           ],
           "output": [
             472,
-            416
+            415
           ],
           "pt": 156.6
         },
@@ -66,7 +66,7 @@
           ],
           "output": [
             236,
-            317
+            316
           ],
           "pt": 53.7
         },
@@ -80,7 +80,7 @@
             487,
             315
           ],
-          "pt": 29.2
+          "pt": 29.5
         },
         {
           "word": "rounded",
@@ -89,46 +89,46 @@
             416
           ],
           "output": [
-            298,
-            417
+            299,
+            415
           ],
-          "pt": 28.1
+          "pt": 28.8
         },
         {
-          "word": "pos",
+          "word": "cyber",
           "source": [
-            482,
-            680
+            167,
+            256
           ],
           "output": [
-            506,
-            678
+            192,
+            255
           ],
-          "pt": 24.2
+          "pt": 25.2
         },
         {
-          "word": "through",
+          "word": "basic",
           "source": [
-            437,
-            681
+            127,
+            254
           ],
           "output": [
-            459,
-            679
+            148,
+            254
           ],
-          "pt": 21.6
+          "pt": 20.9
         },
         {
-          "word": "card",
+          "word": "security-09",
           "source": [
-            393,
-            678
+            226,
+            256
           ],
           "output": [
-            415,
-            678
+            238,
+            255
           ],
-          "pt": 21.2
+          "pt": 12.3
         }
       ]
     }

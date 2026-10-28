@@ -1,0 +1,136 @@
+{
+  "label": "messbill_ocr_mlkit",
+  "source_pages": 1,
+  "output_pages": 1,
+  "source_sizes_pt": [
+    [
+      595.276,
+      841.89
+    ]
+  ],
+  "output_sizes_pt": [
+    [
+      595.304,
+      841.89
+    ]
+  ],
+  "page_count_match": true,
+  "page_size_match": true,
+  "docx_pictures": 3,
+  "docx_text_runs": 189,
+  "docx_tables": 2,
+  "pages": [
+    {
+      "page": 1,
+      "ssim": 0.6776,
+      "mean_abs_diff": 53.22,
+      "pixels_differing_over_64": 0.223,
+      "ocr_words_source": 100,
+      "ocr_words_output": 100,
+      "matched_words": 92,
+      "word_recall": 0.92,
+      "word_precision": 0.92,
+      "displacement_pt_median": 2.31,
+      "displacement_pt_p90": 5.86,
+      "displacement_pt_max": 24.19,
+      "largest_displacements": [
+        {
+          "word": "pos",
+          "source": [
+            482,
+            680
+          ],
+          "output": [
+            506,
+            678
+          ],
+          "pt": 24.2
+        },
+        {
+          "word": "through",
+          "source": [
+            437,
+            681
+          ],
+          "output": [
+            459,
+            679
+          ],
+          "pt": 21.6
+        },
+        {
+          "word": "card",
+          "source": [
+            393,
+            678
+          ],
+          "output": [
+            415,
+            678
+          ],
+          "pt": 21.2
+        },
+        {
+          "word": "accommodation",
+          "source": [
+            241,
+            365
+          ],
+          "output": [
+            229,
+            364
+          ],
+          "pt": 12.0
+        },
+        {
+          "word": "mcte",
+          "source": [
+            242,
+            678
+          ],
+          "output": [
+            251,
+            678
+          ],
+          "pt": 9.0
+        },
+        {
+          "word": "2.",
+          "source": [
+            53,
+            724
+          ],
+          "output": [
+            53,
+            731
+          ],
+          "pt": 7.2
+        },
+        {
+          "word": "mess",
+          "source": [
+            198,
+            676
+          ],
+          "output": [
+            204,
+            678
+          ],
+          "pt": 6.7
+        },
+        {
+          "word": "amount",
+          "source": [
+            460,
+            312
+          ],
+          "output": [
+            454,
+            315
+          ],
+          "pt": 6.6
+        }
+      ]
+    }
+  ]
+}

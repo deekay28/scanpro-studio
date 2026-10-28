@@ -54,6 +54,18 @@ With ML Kit's boxes this went wrong in several ways:
 
 Reproduced here: tesseract words with ML Kit-like boxes (padded by 0.2–0.5 of their height, or whole lines split evenly into words) produced the same strips. With very loose boxes the page also overflowed to two pages, with oversized text and noise like "iy" placed as text.
 
+### 1c. v1.0.11 on a phone (`phone_v1.0.11/editable.docx`)
+
+The structure was right this time: no strips, 3 pictures, real tables. Three problems were left:
+- **Missing colons.** ML Kit does not return lone punctuation. The ":" after Rank, Name, From, To and Date and the "/" in "'at par' / crossed" were missing, and "Fac/Wing:" came back as "FacWing:".
+- **The lone "1"** in the table was not returned.
+- **The grey band** started at the paper's shadowed left edge (10.8 pt) instead of the table/text column (43 pt).
+
+Fixes:
+- **Colons and slashes are read from the ink** when OCR leaves them out. A colon is two small dots stacked on the local baseline. A slash is a straight, narrow stroke rising to the right, standing alone or joined to the next letter (in which case that letter's ink is wider than it should be). Ink that OCR read as some other mark (for example ":" misread as "+") is not doubled. Recovered marks go into the review list.
+- **Band edges** close to the table's or text column's edges (within 8% of the page width) are aligned with them.
+- **The unread search** now accepts narrow marks and ignores broken cell-border pieces, so the "1" is sent to the second OCR pass. If it is still unreadable, the result notes say so, and Review OCR words lists it as an unread mark in a table cell. The cell is never silently emptied.
+
 ## 2. Modes
 
 Choose under **Conversion Centre → PDF → Word**. Each option is explained on screen.
@@ -176,6 +188,12 @@ Run `test/layout_test.dart`. Comparisons need LibreOffice and tesseract (plus zb
 | Padded 0.2 h | 3 (0) | 2 | 2.9 / 6.5 pt | 0.92 |
 | Padded 0.5 h | 3 (0) | 2 | 3.1 / 7.4 pt | 0.92 |
 | Lines split evenly | 3 (0) | 2 | 2.6 / 12.0 pt | 0.86 |
+| ML Kit as seen on the phone (padded boxes, no lone ":" "/" or "1", "FacWing:") | 3 (0) | 2 | 2.3 / 5.9 pt | 0.92 |
+
+In every style, the test also requires:
+- "Bill No :", "Rank :", "Name :", "Status :", "From :" and "Date :";
+- "Fac/Wing" and "Credit /Debit";
+- the band starting and ending with the charges table (within 1.5 pt).
 
 For comparison, the v1.0.10 phone output had 6 pictures, 2 of them strips, and is kept as a failing fixture. In the line-split case the header words of the charges table can land one cell off; the test records this.
 
@@ -206,6 +224,8 @@ All results come from rendering with LibreOffice. Microsoft Word may differ slig
 - **Curled paper** is only perspective-corrected, so a few words end up up to ~25 pt off.
 - **Fonts on scans** are estimated as Arial or Times. No exact font match is claimed.
 - **Split boxes:** with evenly split line boxes, words in wide table rows can be assigned one cell off.
+- **A lone digit ML Kit skips** (the "1" in the charges table) may stay unread. Tesseract can't read it from a crop either. The cell is then empty, and the notes and the review list say so.
+- **Punctuation from ink:** only ":" and "/" are recovered from the ink. Other punctuation OCR drops (a lone "." or "-") is not recovered.
 - **Digital pages:** hyperlinks and filled vector shapes are not rebuilt. Pages wrapped in form XObjects lose their ruling lines and images in Editable mode.
 - **Complex tables:** tables without ruling lines become tab-aligned lines, not Word tables.
 - **CI coverage:** CI has no LibreOffice, so the visual comparisons run locally only. Tesseract (English and Hindi) and zbar run in CI.

@@ -464,6 +464,10 @@ class ConversionService {
       for (final pr in cov.problems) {
         warnings.add('Page ${pi + 1}: check the layout: $pr.');
       }
+      if (page.unreadInTables.isNotEmpty) {
+        warnings.add('Page ${pi + 1}: ${page.unreadInTables.length} mark(s) in table cells could not be read (a lone digit, for example); '
+            'the cell is left empty. They are listed in "Review OCR words"; check them against the original.');
+      }
       out.add(page);
     }
     token.check();

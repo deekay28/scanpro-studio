@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import '../model/page_content.dart' show PdfWord;
-import 'layout_model.dart' show median;
+import 'layout_model.dart' show median, textAdvance;
 
 /// OCR engines differ a lot in how exact their word boxes are: tesseract
 /// boxes fit the ink, ML Kit boxes are padded, sometimes only whole lines
@@ -31,6 +31,7 @@ class InkGeometry {
   final void Function(String)? log;
 
   double body = 0;
+  Uint8List _mask = Uint8List(0);
   bool _faint(_Comp c) => c.n >= 6 && (c.meanLevel > body + 38 || c.coloredShare > 0.45);
 
   /// Words dropped as stamp text or noise (for the review report).
@@ -42,7 +43,7 @@ class InkGeometry {
     var hs = words.map((x) => x.box.height).toList()..sort();
     final typical = hs[hs.length ~/ 2];
     hs = [];
-    final mask = withoutStrokes(math.max(12, (typical * 2.6).round()));
+    final mask = _mask = withoutStrokes(math.max(12, (typical * 2.6).round()));
     var comps = _components(mask, maxH: typical * 3);
     // Pieces of ruling lines shorter than the stroke limit (cell borders,
     // short underlines) are not letters: thin and long compared with the
@@ -291,6 +292,32 @@ class InkGeometry {
       dropped.addAll(ws);
       return const [];
     }
+    // Punctuation OCR engines skip (ML Kit drops lone ":" and "/"): read
+    // from the ink when its shape is unmistakable, and listed for review.
+    // Baseline near each mark (a long line in a tilted photo isn't level).
+    double baseNear(_Comp c) => median([
+          for (final o in clusters)
+            if (o.height >= capH * 0.6 && o.height <= capH * 1.1 && (o.center.dx - c.center.dx).abs() < capH * 5) o.y1.toDouble(),
+        ]);
+    final synth = <PdfWord>[];
+    for (var i = clusters.length - 1; i >= 0; i--) {
+      final c = clusters[i];
+      final mark = _colon(c, capH, baseNear(c)) ? ':' : (_slash(c, capH) ? '/' : null);
+      if (mark == null) continue;
+      final gl = i > 0 ? c.x0 - clusters[i - 1].x1 - 1 : 1 << 20, gr = i < clusters.length - 1 ? clusters[i + 1].x0 - c.x1 - 1 : 1 << 20;
+      // Read already: as this mark, or as some other short mark (OCR
+      // misreading ":" as "+" is kept as read, never doubled).
+      final read = ws.any((wd) =>
+          (wd.text.contains(mark) && wd.box.right >= c.x0 - capH * 0.3 && wd.box.left <= c.x1 + capH * 0.3) ||
+          (wd.text.length <= 2 && !RegExp(r'[A-Za-z0-9\u0900-\u097F]').hasMatch(wd.text) && wd.box.right >= c.x0 && wd.box.left <= c.x1));
+      if (read || math.min(gl, gr) < capH * 0.2) continue;
+      synth.add(PdfWord(mark, Rect.fromLTRB(c.x0.toDouble(), c.y0.toDouble(), c.x1 + 1.0, c.y1 + 1.0), confidence: 0.59, line: ws.first.line)..ink = c);
+      clusters.removeAt(i);
+    }
+    if (clusters.isEmpty) {
+      dropped.addAll(ws);
+      return synth;
+    }
     // Specks and hairlines (remains of a cell border) far from any letter
     // would look like words.
     final thinText = ws.any((x) => RegExp(r'^[1lI|!:;.,]+$').hasMatch(x.text));
@@ -444,9 +471,132 @@ class InkGeometry {
         continue;
       }
       final u = gs.reduce((a, b) => _Comp.copy(a)..merge(b));
-      out.add(PdfWord(wd.text, Rect.fromLTRB(u.x0.toDouble(), u.y0.toDouble(), u.x1 + 1.0, u.y1 + 1.0), confidence: wd.confidence, line: wd.line)..ink = u);
+      var text = wd.text;
+      var conf = wd.confidence;
+      // A slash between letters that OCR left out ("FacWing" for
+      // "Fac/Wing"): put back where it is, and listed for review.
+      if (!text.contains('/') && gs.length >= 2) {
+        final total = textAdvance(text);
+        final em = (u.x1 - u.x0 + 1) / math.max(0.1, total - 0.07); // pixels per em
+        for (var i = 0; i < gs.length - 1; i++) {
+          double p;
+          if (_slash(gs[i], capH)) {
+            // Also a word's first character ("/Debit").
+            p = ((gs[i].x0 + gs[i].x1) / 2 - u.x0) / math.max(1, u.x1 - u.x0);
+          } else if (i > 0 && _leadingSlash(gs[i], capH)) {
+            // Slash touching the next letter: the cluster is wider than that
+            // letter alone.
+            final at0 = _charAt(text, (gs[i].x0 + capH * 0.2 - u.x0) / math.max(1, u.x1 - u.x0));
+            if (at0 >= text.length || gs[i].width < textAdvance(text[at0]) * em + capH * 0.2) continue;
+            p = (gs[i].x0 - u.x0) / math.max(1, u.x1 - u.x0);
+          } else {
+            continue;
+          }
+          var acc = 0.0, at = text.length;
+          for (var c = 0; c < text.length; c++) {
+            final adv = textAdvance(text[c]);
+            if ((acc + adv / 2) / total > p) {
+              at = c;
+              break;
+            }
+            acc += adv;
+          }
+          if ((at == 0 && i > 0) || at == text.length) continue;
+          text = '${text.substring(0, at)}/${text.substring(at)}';
+          conf = math.min(conf ?? 0.8, 0.59);
+          break;
+        }
+      }
+      out.add(PdfWord(text, Rect.fromLTRB(u.x0.toDouble(), u.y0.toDouble(), u.x1 + 1.0, u.y1 + 1.0), confidence: conf, line: wd.line)..ink = u);
     }
-    return out;
+    return [...out, ...synth];
+  }
+
+  /// Two small dots, one above the other, the lower one on the baseline.
+  bool _colon(_Comp c, double capH, double base) =>
+      c.parts == 2 &&
+      c.maxPartH <= capH * 0.35 &&
+      c.maxPartW <= capH * 0.35 &&
+      c.height >= capH * 0.35 &&
+      c.height <= capH * 0.9 &&
+      c.maxPartH * 2 < c.height &&
+      (c.y1 - base).abs() <= capH * 0.2;
+
+  /// A straight stroke rising to the right, about a letter high: row by row
+  /// the ink is narrow and its centre moves steadily right going up.
+  bool _slash(_Comp c, double capH) {
+    if (c.parts != 1 || c.height < capH * 0.8 || c.height > capH * 1.4 || c.width < capH * 0.15 || c.width > capH * 0.55) return false;
+    final ys = <double>[], xs = <double>[];
+    for (var y = c.y0; y <= c.y1; y++) {
+      var sx = 0, n = 0, lo = 1 << 30, hi = -1;
+      for (var x = c.x0; x <= c.x1; x++) {
+        if (_mask[y * w + x] == 1) {
+          sx += x;
+          n++;
+          lo = math.min(lo, x);
+          hi = math.max(hi, x);
+        }
+      }
+      if (n == 0) continue;
+      if (hi - lo + 1 > c.width * 0.6) return false; // a bar (7, F, T)
+      ys.add(y.toDouble());
+      xs.add(sx / n);
+    }
+    if (ys.length < c.height * 0.8) return false;
+    final my = ys.reduce((a, b) => a + b) / ys.length, mx = xs.reduce((a, b) => a + b) / xs.length;
+    var sxy = 0.0, syy = 0.0;
+    for (var i = 0; i < ys.length; i++) {
+      sxy += (ys[i] - my) * (xs[i] - mx);
+      syy += (ys[i] - my) * (ys[i] - my);
+    }
+    final slope = sxy / syy; // x per y (y grows downwards)
+    var res = 0.0;
+    for (var i = 0; i < ys.length; i++) {
+      final d = xs[i] - (mx + slope * (ys[i] - my));
+      res += d * d;
+    }
+    return slope < -0.15 && slope > -0.7 && math.sqrt(res / ys.length) <= c.width * 0.12;
+  }
+
+  /// Index of the character of [text] at fraction [p] of its width.
+  static int _charAt(String text, double p) {
+    final total = textAdvance(text);
+    var acc = 0.0;
+    for (var c = 0; c < text.length; c++) {
+      acc += textAdvance(text[c]);
+      if (acc / total > p) return c;
+    }
+    return text.length;
+  }
+
+  /// A cluster whose left edge is a straight stroke rising to the right
+  /// over the full letter height: a slash joined to the letter after it.
+  bool _leadingSlash(_Comp c, double capH) {
+    if (c.height < capH * 0.8 || c.height > capH * 1.4 || c.width < capH * 0.7) return false;
+    final ys = <double>[], xs = <double>[];
+    for (var y = c.y0; y <= c.y1; y++) {
+      for (var x = c.x0; x <= c.x1; x++) {
+        if (_mask[y * w + x] == 1) {
+          ys.add(y.toDouble());
+          xs.add(x.toDouble());
+          break;
+        }
+      }
+    }
+    if (ys.length < c.height * 0.85) return false;
+    final my = ys.reduce((a, b) => a + b) / ys.length, mx = xs.reduce((a, b) => a + b) / xs.length;
+    var sxy = 0.0, syy = 0.0;
+    for (var i = 0; i < ys.length; i++) {
+      sxy += (ys[i] - my) * (xs[i] - mx);
+      syy += (ys[i] - my) * (ys[i] - my);
+    }
+    final slope = sxy / syy;
+    var res = 0.0;
+    for (var i = 0; i < ys.length; i++) {
+      final d = xs[i] - (mx + slope * (ys[i] - my));
+      res += d * d;
+    }
+    return slope < -0.15 && slope > -0.7 && math.sqrt(res / ys.length) <= capH * 0.06;
   }
 
   /// Drops words printed in a lighter or coloured ink than the page's text.
@@ -503,6 +653,8 @@ class _Grid {
 class _Comp {
   int x0, y0, x1, y1;
   int n = 0, levelSum = 0, coloredN = 0;
+  int parts = 1; // connected components merged into this one
+  int _partH = -1, _partW = -1; // size of the largest part (-1: this one)
   _Comp(int x, int y)
       : x0 = x,
         y0 = y,
@@ -515,7 +667,14 @@ class _Comp {
         y1 = c.y1,
         n = c.n,
         levelSum = c.levelSum,
-        coloredN = c.coloredN;
+        coloredN = c.coloredN,
+        parts = c.parts,
+        _partH = c.maxPartH,
+        _partW = c.maxPartW;
+
+  int get width => x1 - x0 + 1;
+  int get maxPartH => _partH < 0 ? height : _partH;
+  int get maxPartW => _partW < 0 ? width : _partW;
 
   int get height => y1 - y0 + 1;
   Offset get center => Offset((x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2);
@@ -533,6 +692,9 @@ class _Comp {
   }
 
   void merge(_Comp o) {
+    _partH = math.max(maxPartH, o.maxPartH);
+    _partW = math.max(maxPartW, o.maxPartW);
+    parts += o.parts;
     x0 = math.min(x0, o.x0);
     y0 = math.min(y0, o.y0);
     x1 = math.max(x1, o.x1);
